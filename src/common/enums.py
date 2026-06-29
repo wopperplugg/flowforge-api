@@ -24,3 +24,8 @@ class TaskPriority(StrEnum):
     HIGH="high"
     CRITICAL="critical"
 
+class OutboxStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    PROCESSED = "processed"
+    FAILED = "failed"
