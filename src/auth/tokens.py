@@ -1,4 +1,4 @@
-import uuid 
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 import jwt
@@ -6,6 +6,7 @@ from src.common.exceptions import ExpiredTokenError, InvalidTokenError
 from src.config import settings
 
 TokenType = Literal["access", "refresh"]
+
 
 def create_access_token(subject: uuid.UUID) -> tuple[str, int]:
     now = datetime.now(UTC)
@@ -23,14 +24,17 @@ def create_access_token(subject: uuid.UUID) -> tuple[str, int]:
         "iss": settings.jwt_issuer,
         "aud": settings.jwt_audience,
     }
-    token = jwt.encode(payload, settings.app_secret_key.get_secret_value(), algorithm="HS256")
+    token = jwt.encode(
+        payload, settings.app_secret_key.get_secret_value(), algorithm="HS256"
+    )
     return token, expires_in
 
+
 def create_refresh_token(
-        subject: uuid.UUID,
-        *,
-        family_id: uuid.UUID | None = None,
-        jti: uuid.UUID | None = None,
+    subject: uuid.UUID,
+    *,
+    family_id: uuid.UUID | None = None,
+    jti: uuid.UUID | None = None,
 ) -> tuple[str, uuid.UUID, uuid.UUID, datetime]:
     now = datetime.now(UTC)
     token_family_id = family_id or uuid.uuid4()
@@ -48,8 +52,11 @@ def create_refresh_token(
         "iss": settings.jwt_issuer,
         "aud": settings.jwt_audience,
     }
-    token = jwt.encode(payload, settings.app_secret_key.get_secret_value(), algorithm="HS256")
+    token = jwt.encode(
+        payload, settings.app_secret_key.get_secret_value(), algorithm="HS256"
+    )
     return token, token_jti, token_family_id, expires_at
+
 
 def decode_token(token: str, expected_type: TokenType) -> dict[str, object]:
     try:
@@ -64,8 +71,8 @@ def decode_token(token: str, expected_type: TokenType) -> dict[str, object]:
         raise ExpiredTokenError() from exc
     except jwt.InvalidTokenError as exc:
         raise InvalidTokenError() from exc
-    
+
     if payload.get("type") != expected_type:
         raise InvalidTokenError()
-    
+
     return payload

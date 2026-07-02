@@ -20,7 +20,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    user_role = postgresql.ENUM("user", "moderator", "admin", name="user_role", create_type=False)
+    user_role = postgresql.ENUM(
+        "user", "moderator", "admin", name="user_role", create_type=False
+    )
     user_role.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
@@ -37,8 +39,18 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean(), server_default=sa.true(), nullable=False),
         sa.Column("role", user_role, server_default="user", nullable=False),
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_users")),
         sa.UniqueConstraint("email", name="uq_users_email"),
         sa.UniqueConstraint("username", name="uq_users_username"),
@@ -54,17 +66,31 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("replaced_by_jti", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.Column("last_used_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("user_agent", sa.String(length=512), nullable=True),
         sa.Column("ip_address", sa.String(length=45), nullable=True),
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_refresh_sessions_user_id_users"), ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["user_id"],
+            ["users.id"],
+            name=op.f("fk_refresh_sessions_user_id_users"),
+            ondelete="CASCADE",
+        ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_refresh_sessions")),
     )
-    op.create_index("ix_refresh_sessions_family_id", "refresh_sessions", ["family_id"], unique=False)
+    op.create_index(
+        "ix_refresh_sessions_family_id", "refresh_sessions", ["family_id"], unique=False
+    )
     op.create_index("ix_refresh_sessions_jti", "refresh_sessions", ["jti"], unique=True)
-    op.create_index("ix_refresh_sessions_user_id", "refresh_sessions", ["user_id"], unique=False)
+    op.create_index(
+        "ix_refresh_sessions_user_id", "refresh_sessions", ["user_id"], unique=False
+    )
 
 
 def downgrade() -> None:

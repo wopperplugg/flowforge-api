@@ -1,7 +1,16 @@
 from functools import cached_property
 from typing import Literal
-from pydantic import Field, AnyUrl, PostgresDsn, RedisDsn, computed_field, model_validator, SecretStr
+from pydantic import (
+    Field,
+    AnyUrl,
+    PostgresDsn,
+    RedisDsn,
+    computed_field,
+    model_validator,
+    SecretStr,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -11,11 +20,17 @@ class Settings(BaseSettings):
     )
 
     app_name: str = Field(default="FlowForge API", alias="APP_NAME")
-    app_env: Literal["local", "test", "staging", "production"] = Field(default="local", alias="APP_ENV")
+    app_env: Literal["local", "test", "staging", "production"] = Field(
+        default="local", alias="APP_ENV"
+    )
     app_debug: bool = Field(default=True, alias="APP_DEBUG")
-    app_secret_key: SecretStr = Field(default="local-development-secret-change-me-32-bytes", alias="APP_SECRET_KEY")
+    app_secret_key: SecretStr = Field(
+        default="local-development-secret-change-me-32-bytes", alias="APP_SECRET_KEY"
+    )
     webhook_secret_encryption_key: SecretStr | None = None
-    app_cors_origins: list[AnyUrl] = Field(default_factory=list, alias="APP_CORS_ORIGINS")
+    app_cors_origins: list[AnyUrl] = Field(
+        default_factory=list, alias="APP_CORS_ORIGINS"
+    )
 
     postgres_host: str = Field(default="localhost", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT", ge=1, le=65535)
@@ -36,13 +51,17 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = Field(default=60, gt=0)
     webhook_timeout_seconds: float = Field(default=5.0, gt=0)
 
-
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":
         if self.app_env == "production":
-            weak_secret = self.app_secret_key.get_secret_value() == "local-development-secret-change-me-32-bytes"
-            weak_postgres_password = self.postgres_password.get_secret_value() == "flowforge"
-            missing_webhook_key =  not self.webhook_secret_encryption_key
+            weak_secret = (
+                self.app_secret_key.get_secret_value()
+                == "local-development-secret-change-me-32-bytes"
+            )
+            weak_postgres_password = (
+                self.postgres_password.get_secret_value() == "flowforge"
+            )
+            missing_webhook_key = not self.webhook_secret_encryption_key
             if weak_secret or weak_postgres_password or missing_webhook_key:
                 msg = (
                     "Production requires explicit APP_SECRET_KEY, POSTGRES_PASSWORD, "
@@ -63,7 +82,7 @@ class Settings(BaseSettings):
             port=self.postgres_port,
             path=self.postgres_db,
         )
-    
+
     @computed_field
     @cached_property
     def redis_dsn(self) -> RedisDsn:
@@ -73,5 +92,6 @@ class Settings(BaseSettings):
             port=self.redis_port,
             path=str(self.redis_db),
         )
+
 
 settings = Settings()

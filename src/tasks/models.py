@@ -109,5 +109,6 @@ class TaskStatusHistory(UUIDPrimaryKeyMixin, Base):
         ),
         nullable=False,
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )

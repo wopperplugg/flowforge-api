@@ -10,8 +10,10 @@ redis_client: Redis = Redis.from_url(
     decode_response=True,
 )
 
+
 async def get_redis() -> AsyncIterator[Redis]:
     yield redis_client
+
 
 async def close_redis() -> None:
     await redis_client.aclose()

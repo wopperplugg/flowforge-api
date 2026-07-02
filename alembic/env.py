@@ -10,6 +10,14 @@ from src.auth import models as auth_models  # noqa: F401
 from src.config import settings
 from src.database import Base
 from src.users import models as user_models  # noqa: F401
+from src.projects.models import Project  # noqa: F401
+from src.organizations.models import Organization, OrganizationMember  # noqa: F401
+from src.tasks.models import Task, TaskComment, TaskStatusHistory  # noqa: F401
+from src.audit.models import AuditLog  # noqa: F401
+from src.idempotency.models import IdempotencyKey  # noqa: F401
+from src.webhooks.models import WebhookSubscription, WebhookDelivery  # noqa: F401
+from src.outbox.models import OutboxEvent  # noqa: F401
+
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

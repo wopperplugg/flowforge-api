@@ -6,7 +6,9 @@ class AppError(Exception):
     message = "Application error"
     status_code = 500
 
-    def __init__(self, message: str | None = None, details: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, message: str | None = None, details: dict[str, Any] | None = None
+    ) -> None:
         super().__init__(message or self.message)
         self.message = message or self.message
         self.details = details or {}

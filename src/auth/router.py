@@ -1,17 +1,17 @@
-import uuid 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
 
 from src.auth.dependencies import get_current_user
 from src.auth.schemas import (
-    LoginRequest, 
+    LoginRequest,
     LogoutResponse,
     RefreshSessionResponse,
     RefreshTokenRequest,
     TokenResponse,
 )
-from src.auth.service import AuthService 
+from src.auth.service import AuthService
 from src.common.dependencies import DbSession
 from src.users.models import User
 from src.users.schemas import UserCreate, UserResponse
@@ -19,15 +19,18 @@ from src.users.service import UserService
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
+
 def get_user_service(
-        session: DbSession,
+    session: DbSession,
 ) -> UserService:
     return UserService(session)
 
+
 def get_auth_service(
-        session: DbSession,
+    session: DbSession,
 ) -> AuthService:
     return AuthService(session)
+
 
 @router.post(
     "/register",
@@ -35,11 +38,11 @@ def get_auth_service(
     status_code=status.HTTP_201_CREATED,
 )
 async def register(
-    payload: UserCreate,
-    user_service: Annotated[UserService, Depends(get_user_service)]
+    payload: UserCreate, user_service: Annotated[UserService, Depends(get_user_service)]
 ) -> UserResponse:
     user = await user_service.create_user(payload)
     return UserResponse.model_validate(user)
+
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
@@ -53,6 +56,7 @@ async def login(
         ip_address=request.client.host if request.client else None,
     )
 
+
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(
     request: Request,
@@ -65,6 +69,7 @@ async def refresh(
         ip_address=request.client.host if request.client else None,
     )
 
+
 @router.post("/logout", response_model=LogoutResponse)
 async def logout(
     payload: RefreshTokenRequest,
@@ -72,6 +77,7 @@ async def logout(
 ) -> LogoutResponse:
     revoked = await auth_service.logout(payload)
     return LogoutResponse(revoked=revoked)
+
 
 @router.post("/logout-all", response_model=LogoutResponse)
 async def logout_all(
@@ -81,6 +87,7 @@ async def logout_all(
     revoked = await auth_service.logout_all(current_user)
     return LogoutResponse(revoked=revoked)
 
+
 @router.get("/sessions", response_model=list[RefreshSessionResponse])
 async def list_sesions(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -88,6 +95,7 @@ async def list_sesions(
 ) -> list[RefreshSessionResponse]:
     sessions = await auth_service.list_sessions(current_user)
     return [RefreshSessionResponse.model_validate(session) for session in sessions]
+
 
 @router.delete("/sessions/{session_id}", response_model=LogoutResponse)
 async def revoke_session(
@@ -97,6 +105,7 @@ async def revoke_session(
 ) -> LogoutResponse:
     revoked = await auth_service.revoke_session(current_user, session_id)
     return LogoutResponse(revoked=revoked)
+
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(

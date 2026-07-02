@@ -1,4 +1,4 @@
-import time 
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -10,8 +10,11 @@ from src.infrastructure.request_context import request_id_var
 
 logger = structlog.get_logger(__name__)
 
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         token = request_id_var.set(request_id)
         started_at = time.perf_counter()

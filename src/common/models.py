@@ -13,6 +13,7 @@ class UUIDPrimaryKeyMixin:
         default=uuid.uuid4,
     )
 
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

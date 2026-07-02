@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.common.models import TimestampMixin, UUIDPrimaryKeyMixin
 from src.database import Base
 
+
 class WebhookSubscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "webhook_subscriptions"
 
@@ -16,11 +17,14 @@ class WebhookSubscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=False,
     )
-    url: Mapped[str] =mapped_column(String(2048), nullable=False)
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
     secret_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    secret_encrypted: Mapped[str | None] =mapped_column(Text)
+    secret_encrypted: Mapped[str | None] = mapped_column(Text)
     event_types: Mapped[list[str]] = mapped_column(ARRAY(String(100)), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=true())
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=true()
+    )
+
 
 class WebhookDelivery(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "webhook_deliveries"
@@ -40,4 +44,3 @@ class WebhookDelivery(UUIDPrimaryKeyMixin, Base):
         nullable=False,
         server_default=func.now(),
     )
-    

@@ -1,11 +1,12 @@
-import uuid 
-from datetime import datetime 
+import uuid
+from datetime import datetime
 from sqlalchemy import DateTime, Enum, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from src.common.enums import OutboxStatus
 from src.common.models import TimestampMixin, UUIDPrimaryKeyMixin
 from src.database import Base
+
 
 class OutboxEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "outbox_events"
@@ -24,8 +25,8 @@ class OutboxEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="outbox_status",
             native_enum=True,
             create_type=False,
-            values_callable=lambda enum_cls: [item.value for item in enum_cls]
-        ), 
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         nullable=False,
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

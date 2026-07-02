@@ -4,6 +4,7 @@ import uuid
 from pydantic import AnyUrl, Field, field_validator
 from src.common.schemas import BaseSchema, TimestampSchema
 
+
 class WebhookCreate(BaseSchema):
     url: AnyUrl
     event_types: list[str] = Field(min_length=1, max_length=50)
@@ -17,13 +18,15 @@ class WebhookCreate(BaseSchema):
         if len(set(normalized)) != len(normalized):
             raise ValueError("Event types must be unique")
         return normalized
-    
+
+
 class WebhookResponse(TimestampSchema):
     id: uuid.UUID
     organization_id: uuid.UUID
     url: str
     event_types: list[str]
     is_active: bool
+
 
 class WebhookCreateResponse(WebhookResponse):
     secret: str

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.webhooks.models import WebhookSubscription
 
+
 class WebhookRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -13,8 +14,10 @@ class WebhookRepository:
         await self.session.flush()
         await self.session.refresh(webhook)
         return webhook
-    
-    async def list_for_organization(self, organization_id: uuid.UUID, limit: int = 100, offset: int = 0) -> list[WebhookSubscription]:
+
+    async def list_for_organization(
+        self, organization_id: uuid.UUID, limit: int = 100, offset: int = 0
+    ) -> list[WebhookSubscription]:
         result = await self.session.execute(
             select(WebhookSubscription)
             .where(WebhookSubscription.organization_id == organization_id)
@@ -23,11 +26,11 @@ class WebhookRepository:
             .offset(offset)
         )
         return list(result.scalars().all())
-    
+
     async def list_active_for_event(
-            self,
-            organization_id: uuid.UUID,
-            event_type: str,
+        self,
+        organization_id: uuid.UUID,
+        event_type: str,
     ) -> list[WebhookSubscription]:
         result = await self.session.execute(
             select(WebhookSubscription).where(

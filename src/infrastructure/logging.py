@@ -8,13 +8,15 @@ import structlog
 from src.config import settings
 from src.infrastructure.request_context import get_request_id
 
+
 def add_request_id(
-        _: Any,
-        __: str,
-        event_dict: MutableMapping[str, Any],
+    _: Any,
+    __: str,
+    event_dict: MutableMapping[str, Any],
 ) -> MutableMapping[str, Any]:
     event_dict["request_id"] = get_request_id()
     return event_dict
+
 
 def configure_logging() -> None:
     logging.basicConfig(

@@ -11,13 +11,13 @@ from src.infrastructure.redis import redis_client
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(
-            self,
-            request: Request,
-            call_next: Callable[[Request], Awaitable[Response]],
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         if request.url.path.startswith("/health"):
             return await call_next(request)
-        
+
         client = request.client.host if request.client else "unknown"
         key = f"rate_limit:{client}:{request.url.path}"
 

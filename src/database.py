@@ -1,7 +1,6 @@
 from collections.abc import AsyncGenerator
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import Depends
 from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -16,6 +15,7 @@ convention = {
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
     "pk": "pk_%(table_name)s",
 }
+
 
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=convention)
@@ -43,12 +43,12 @@ async def get_db_session() -> AsyncGenerator[AsyncSession]:
     async with async_session_maker() as session:
         try:
             yield session
-        except Exception as e:
+        except Exception:
             await session.rollback()
             raise
         finally:
             await session.close()
 
-        
+
 async def dispose_engine() -> None:
     await engine.dispose()
