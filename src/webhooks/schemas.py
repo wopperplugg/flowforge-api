@@ -1,7 +1,7 @@
 import uuid
 
-
 from pydantic import AnyUrl, Field, field_validator
+
 from src.common.schemas import BaseSchema, TimestampSchema
 
 

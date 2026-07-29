@@ -5,17 +5,18 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from src.auth.router import router as auth_router
 from src.common.exceptions import AppError
 from src.common.schemas import ErrorPayload, ErrorResponse
-from src.infrastructure.logging import configure_logging
-from src.infrastructure.middleware import RequestContextMiddleware
-from src.infrastructure.request_context import get_request_id
-from src.infrastructure.redis import close_redis
-from src.infrastructure.rate_limit import RateLimitMiddleware
 from src.config import settings
 from src.database import dispose_engine
-from src.auth.router import router as auth_router
 from src.infrastructure.health import router as health_router
+from src.infrastructure.logging import configure_logging
+from src.infrastructure.middleware import RequestContextMiddleware
+from src.infrastructure.rate_limit import RateLimitMiddleware
+from src.infrastructure.redis import close_redis
+from src.infrastructure.request_context import get_request_id
 from src.organizations.router import router as organizations_router
 from src.projects.router import router as projects_router
 from src.tasks.router import router as tasks_router
@@ -50,7 +51,7 @@ app.add_middleware(RequestContextMiddleware)
 @app.exception_handler(AppError)
 async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
     payload = ErrorResponse(
-        error=ErrorPayload(code=exc.code, message=exc.message, detail=exc.details),
+        error=ErrorPayload(code=exc.code, message=exc.message, details=exc.details),
         request_id=get_request_id(),
     )
     return JSONResponse(

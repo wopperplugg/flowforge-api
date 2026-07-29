@@ -63,11 +63,35 @@ The API exposes:
 
 ```bash
 uv run ruff check .
-uv run pytest
+uv run ruff format --check .
+uv run mypy src tests
+uv run pytest --cov=src
+uv run pre-commit run --all-files
 ```
 
 Current test coverage focuses on the public API contract, health endpoint,
 schema normalization, enum stability, and webhook URL safety checks.
+
+## CI/CD
+
+GitHub Actions runs a quality gate on every pull request and push to `main`:
+
+- Ruff linting and format checks
+- Mypy static type checking
+- Pytest with coverage
+- Pre-commit hooks
+- Docker image build
+
+On pushes to `main` and version tags such as `v1.0.0`, the pipeline publishes
+the Docker image to GitHub Container Registry:
+
+```text
+ghcr.io/<owner>/<repo>
+```
+
+Images are tagged by branch, git tag, and commit SHA. Production deployments
+should pull a published image, run `alembic upgrade head`, then start the API
+and worker containers with production environment variables.
 
 ## API Flow
 

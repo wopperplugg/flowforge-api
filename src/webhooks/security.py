@@ -44,7 +44,9 @@ def decrypt_webhook_secret(encrypted_secret: str) -> str:
         raise ValueError(msg) from exc
 
 
-def sign_webhook_payload(secret: str, timestamp: int, payload: dict[str, object]):
+def sign_webhook_payload(
+    secret: str, timestamp: int, payload: dict[str, object]
+) -> str:
     body = json.dumps(payload, separators=(",", ":"), sort_keys=True)
     message = f"{timestamp}.{body}".encode()
     return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()

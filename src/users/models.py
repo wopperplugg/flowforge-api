@@ -1,8 +1,9 @@
 import uuid
 
 from sqlalchemy import Boolean, Index, String, UniqueConstraint, true
-from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import ENUM
+from sqlalchemy.orm import Mapped, mapped_column
+
 from src.common.enums import UserRole
 from src.common.models import TimestampMixin, UUIDPrimaryKeyMixin
 from src.database import Base

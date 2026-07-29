@@ -1,5 +1,7 @@
 import asyncio
+
 import structlog
+
 from src.database import async_session_maker
 from src.infrastructure.logging import configure_logging
 from src.outbox.repository import OutboxRepository

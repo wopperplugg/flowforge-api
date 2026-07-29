@@ -21,9 +21,11 @@ def test_project_key_is_normalized_to_uppercase() -> None:
 
 def test_webhook_event_types_must_be_unique() -> None:
     with pytest.raises(ValidationError):
-        WebhookCreate(
-            url="https://example.com/hooks/flowforge",
-            event_types=["task.created", "task.created"],
+        WebhookCreate.model_validate(
+            {
+                "url": "https://example.com/hooks/flowforge",
+                "event_types": ["task.created", "task.created"],
+            }
         )
 
 

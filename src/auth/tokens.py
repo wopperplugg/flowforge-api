@@ -1,7 +1,9 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+
 import jwt
+
 from src.common.exceptions import ExpiredTokenError, InvalidTokenError
 from src.config import settings
 

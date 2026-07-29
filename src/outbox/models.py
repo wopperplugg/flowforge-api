@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime
+
 from sqlalchemy import DateTime, Enum, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
+
 from src.common.enums import OutboxStatus
 from src.common.models import TimestampMixin, UUIDPrimaryKeyMixin
 from src.database import Base

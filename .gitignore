@@ -6,6 +6,28 @@ dist/
 wheels/
 *.egg-info
 
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local env files
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Logs
+*.log
+
+docs/
 # Virtual environments
 .venv
 

@@ -8,7 +8,6 @@ Create Date: 2026-06-29 19:54:23.110703
 
 from collections.abc import Sequence
 
-
 # revision identifiers, used by Alembic.
 revision: str = "ebed6546cfe9"
 down_revision: str | Sequence[str] | None = "20260626_0001"

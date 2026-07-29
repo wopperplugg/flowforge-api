@@ -23,4 +23,4 @@ def test_liveness_endpoint_returns_ok() -> None:
 
 
 def test_task_status_review_value_is_stable() -> None:
-    assert TaskStatus.REVIEW == "review"
+    assert TaskStatus.REVIEW.value == "review"
