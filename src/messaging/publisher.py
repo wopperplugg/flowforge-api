@@ -51,6 +51,8 @@ class RabbitMQPublisher:
         )
 
     async def close(self) -> None:
+        if self._channel is not None and not self._channel.is_closed:
+            await self._channel.close()
         if self._connection is not None:
             await self._connection.close()
 
