@@ -1,0 +1,172 @@
+import uuid
+from types import SimpleNamespace
+from typing import Any
+
+import httpx
+import pytest
+from redis.exceptions import RedisError
+
+from src.common.exceptions import RateLimitExceededError
+from src.config import settings
+from src.infrastructure.rate_limit import RateLimitMiddleware
+from src.webhooks import delivery
+from src.webhooks.models import WebhookSubscription
+
+
+class FakeWebhookRepository:
+    def __init__(self, session: object) -> None:
+        self.session = session
+
+    async def list_active_for_event(
+        self,
+        organization_id: uuid.UUID,
+        event_type: str,
+    ) -> list[WebhookSubscription]:
+        return [
+            WebhookSubscription(
+                id=uuid.uuid4(),
+                organization_id=organization_id,
+                url="https://example.com/hook",
+                secret_hash="hash",
+                secret_encrypted="encrypted",
+                event_types=[event_type],
+                is_active=True,
+            )
+        ]
+
+
+class FakeResponse:
+    status_code = 202
+    text = "accepted"
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class FakeAsyncClient:
+    def __init__(self, timeout: float) -> None:
+        self.timeout = timeout
+
+    async def __aenter__(self) -> "FakeAsyncClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def post(
+        self,
+        url: str,
+        *,
+        json: dict[str, object],
+        headers: dict[str, str],
+    ) -> FakeResponse:
+        assert headers["X-FlowForge-Signature"].startswith("sha256=")
+        return FakeResponse()
+
+
+class FakeDeliverySession:
+    def __init__(self) -> None:
+        self.added: list[object] = []
+
+    def add(self, item: object) -> None:
+        self.added.append(item)
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhooks_skips_missing_context_and_records_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeDeliverySession()
+    organization_id = uuid.uuid4()
+
+    await delivery.deliver_webhooks_for_outbox_event(
+        session,  # type: ignore[arg-type]
+        event_id=uuid.uuid4(),
+        event_type="task.created",
+        payload={},
+    )
+    assert session.added == []
+
+    async def resolve_none(session: object, task_id: uuid.UUID) -> None:
+        return None
+
+    monkeypatch.setattr(delivery, "resolve_task_organization_id", resolve_none)
+    await delivery.deliver_webhooks_for_outbox_event(
+        session,  # type: ignore[arg-type]
+        event_id=uuid.uuid4(),
+        event_type="task.created",
+        payload={"task_id": str(uuid.uuid4())},
+    )
+    assert session.added == []
+
+    async def fake_resolve(session: object, task_id: uuid.UUID) -> uuid.UUID:
+        return organization_id
+
+    monkeypatch.setattr(delivery, "resolve_task_organization_id", fake_resolve)
+    monkeypatch.setattr(delivery, "WebhookRepository", FakeWebhookRepository)
+    monkeypatch.setattr(delivery, "is_safe_webhook_url", lambda url: True)
+    monkeypatch.setattr(delivery, "decrypt_webhook_secret", lambda encrypted: "secret")
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    await delivery.deliver_webhooks_for_outbox_event(
+        session,  # type: ignore[arg-type]
+        event_id=uuid.uuid4(),
+        event_type="task.created",
+        payload={"task_id": str(uuid.uuid4())},
+    )
+
+    assert len(session.added) == 1
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_middleware_allows_health_and_handles_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    async def call_next(request: object) -> str:
+        nonlocal calls
+        calls += 1
+        return "ok"
+
+    middleware = RateLimitMiddleware(app=None)  # type: ignore[arg-type]
+    health_request = SimpleNamespace(
+        url=SimpleNamespace(path="/health/live"),
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+    result: Any = await middleware.dispatch(health_request, call_next)  # type: ignore[arg-type]
+    assert result == "ok"
+
+    class FakeRedis:
+        def __init__(self, value: int | BaseException) -> None:
+            self.value = value
+
+        async def incr(self, key: str) -> int:
+            if isinstance(self.value, BaseException):
+                raise self.value
+            return self.value
+
+        async def expire(self, key: str, seconds: int) -> None:
+            assert seconds == settings.rate_limit_window_seconds
+
+    request = SimpleNamespace(
+        url=SimpleNamespace(path="/api/v1/tasks"),
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+    monkeypatch.setattr("src.infrastructure.rate_limit.redis_client", FakeRedis(1))
+    result = await middleware.dispatch(request, call_next)  # type: ignore[arg-type]
+    assert result == "ok"
+
+    monkeypatch.setattr(
+        "src.infrastructure.rate_limit.redis_client",
+        FakeRedis(settings.rate_limit_requests + 1),
+    )
+    with pytest.raises(RateLimitExceededError):
+        await middleware.dispatch(request, call_next)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        "src.infrastructure.rate_limit.redis_client",
+        FakeRedis(RedisError("redis unavailable")),
+    )
+    result = await middleware.dispatch(request, call_next)  # type: ignore[arg-type]
+    assert result == "ok"
