@@ -1,6 +1,7 @@
 from typing import Literal
 
 from pydantic import (
+    AmqpDsn,
     AnyUrl,
     Field,
     PostgresDsn,
@@ -44,6 +45,20 @@ class Settings(BaseSettings):
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT", ge=1, le=65535)
     redis_db: int = Field(default=0, alias="REDIS_DB")
+
+    rabbitmq_host: str = Field(default="localhost", alias="RABBITMQ_HOST")
+    rabbitmq_port: int = Field(
+        default=5672,
+        alias="RABBITMQ_PORT",
+        ge=1,
+        le=65535,
+    )
+    rabbitmq_user: str = Field(default="flowforge", alias="RABBITMQ_USER")
+    rabbitmq_password: SecretStr = Field(
+        default=SecretStr("flowforge"),
+        alias="RABBITMQ_PASSWORD",
+    )
+    rabbitmq_vhost: str = Field(default="/", alias="RABBITMQ_VHOST")
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     access_token_expire_minutes: int = Field(default=15, gt=0)
@@ -92,6 +107,17 @@ class Settings(BaseSettings):
             host=self.redis_host,
             port=self.redis_port,
             path=str(self.redis_db),
+        )
+
+    @computed_field
+    def rabbitmq_dsn(self) -> AmqpDsn:
+        return AmqpDsn.build(
+            scheme="amqp",
+            username=self.rabbitmq_user,
+            password=self.rabbitmq_password.get_secret_value(),
+            host=self.rabbitmq_host,
+            port=self.rabbitmq_port,
+            path=self.rabbitmq_vhost,
         )
 
 

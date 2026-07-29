@@ -5,6 +5,7 @@ description = "Production-ready FastAPI backend для совместной ра
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "aio-pika>=10.0.1",
     "alembic>=1.18.4",
     "asyncpg>=0.31.0",
     "cryptography>=46.0.3",

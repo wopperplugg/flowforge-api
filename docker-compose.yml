@@ -23,6 +23,24 @@ services:
       retries: 5
     restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: rabbitmq
+    ports: 
+      - 5672:5672
+      - 15672:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: flowforge
+      RABBITMQ_DEFAULT_PASS: flowforge
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   worker:
     build: .
     command: python -m src.worker
@@ -31,12 +49,15 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
+      RABBITMQ_HOST: rabbitmq
     volumes:
       - .:/app
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     restart: unless-stopped
 
@@ -74,3 +95,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  rabbitmq_data:
