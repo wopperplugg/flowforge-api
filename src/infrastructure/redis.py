@@ -7,7 +7,7 @@ from src.config import settings
 redis_client: Redis = Redis.from_url(
     str(settings.redis_dsn),
     encoding="utf-8",
-    decode_response=True,
+    decode_responses=True,
 )
 
 
