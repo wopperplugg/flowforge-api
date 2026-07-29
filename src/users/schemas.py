@@ -7,7 +7,7 @@ from src.common.enums import UserRole
 from src.common.schemas import BaseSchema, TimestampSchema
 
 USERNAME_PATTERN = r"^[a-zA-Z0-9_.-]+$"
-PASSWORD_SPECIAL_CHARS_PATTERN = r"""[!@#$%^&*(),.?":{}| <>]"""
+PASSWORD_SPECIAL_CHARS_PATTERN = r"""[!@#$%^&*(),.?":{}| <>]"""  # nosec B105
 
 
 def validate_password_strength(password: str) -> str:

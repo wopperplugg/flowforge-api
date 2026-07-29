@@ -27,7 +27,6 @@ htmlcov/
 # Logs
 *.log
 
-docs/
 # Virtual environments
 .venv
 

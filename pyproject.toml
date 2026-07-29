@@ -1,7 +1,7 @@
 [project]
 name = "flowforge-api"
 version = "0.1.0"
-description = "Add your description here"
+description = "Production-ready FastAPI backend для совместной работы с задачами"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -12,7 +12,7 @@ dependencies = [
     "fastapi>=0.137.2",
     "httpx>=0.28.1",
     "pwdlib[argon2]>=0.3.0",
-    "pydantic-settings>=2.14.1",
+    "pydantic-settings>=2.14.2",
     "pyjwt[crypto]>=2.13.0",
     "python-multipart>=0.0.32",
     "redis>=8.0.0",
@@ -37,10 +37,16 @@ strict = true
 warn_unused_configs = true
 ignore_missing_imports = true
 
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "alembic"]
+skips = ["B101"]
+
 [dependency-groups]
 dev = [
+    "bandit[toml]>=1.8.0",
     "httpx>=0.28.1",
     "mypy>=1.18.0",
+    "pip-audit>=2.8.0",
     "pre-commit>=4.3.0",
     "pytest>=9.1.0",
     "pytest-asyncio>=1.4.0",

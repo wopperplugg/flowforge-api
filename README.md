@@ -1,36 +1,43 @@
 # FlowForge API
 
-FlowForge API is a production-oriented FastAPI backend for collaborative task
-management. It demonstrates authentication, organizations, projects, tasks,
-optimistic locking, outbox-based webhook delivery, PostgreSQL migrations,
-Redis-backed rate limiting, structured logging, and Dockerized runtime.
+[![CI/CD](https://github.com/wopperplugg/flowforge-api/actions/workflows/ci.yml/badge.svg)](https://github.com/wopperplugg/flowforge-api/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.13-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.137%2B-009688)
+![Docker](https://img.shields.io/badge/docker-GHCR-2496ED)
 
-## Tech Stack
+FlowForge API - backend на FastAPI, подготовленный к production, для совместной
+работы с задачами. Проект показывает регистрацию и авторизацию, организации,
+проекты, задачи, optimistic locking, доставку webhook через outbox, миграции
+PostgreSQL, rate limiting на Redis, структурированные логи и Docker-ready
+runtime.
+
+## Стек
 
 - Python 3.13, FastAPI, Pydantic v2
 - SQLAlchemy 2.x async ORM, Alembic, PostgreSQL
-- Redis for rate limiting and runtime infrastructure
-- JWT access/refresh tokens with refresh-token rotation
-- Outbox worker for reliable webhook dispatch
-- Pytest and Ruff for verification
+- Redis для rate limiting и runtime-инфраструктуры
+- JWT access/refresh tokens с ротацией refresh-токенов
+- Outbox worker для надежной доставки webhook
+- Pytest, Ruff, Mypy, Bandit и pip-audit для проверки качества
 
-## Architecture
+## Архитектура
 
-The codebase is split by business domain:
+Код разделен по бизнес-доменам:
 
-- `src/auth` - login, token refresh, logout, session revocation
-- `src/users` - user registration and password hashing
-- `src/organizations` - organizations and membership roles
-- `src/projects` - projects scoped to organizations
-- `src/tasks` - task CRUD, comments, status history, optimistic locking
-- `src/webhooks` - subscriptions, secret handling, signed delivery
-- `src/outbox` - durable event queue for async side effects
-- `src/infrastructure` - logging, health checks, Redis, middleware
+- `src/auth` - login, token refresh, logout, отзыв сессий
+- `src/users` - регистрация пользователей и хеширование паролей
+- `src/organizations` - организации и роли участников
+- `src/projects` - проекты внутри организаций
+- `src/tasks` - CRUD задач, комментарии, история статусов, optimistic locking
+- `src/webhooks` - подписки, секреты, подпись и доставка webhook
+- `src/outbox` - надежная очередь событий для side effects
+- `src/infrastructure` - логирование, health checks, Redis, middleware
 
-Routers stay thin, services own business rules, repositories own database
-queries, and schemas define the HTTP contract.
+Роутеры остаются тонкими: они принимают HTTP-запросы и вызывают сервисы.
+Сервисы содержат бизнес-правила, репозитории отвечают за SQLAlchemy-запросы,
+а схемы Pydantic задают HTTP-контракт.
 
-## Local Setup
+## Локальный запуск
 
 ```bash
 cp .env.example .env
@@ -40,7 +47,7 @@ uv run alembic upgrade head
 uv run uvicorn src.main:app --reload
 ```
 
-OpenAPI docs are available at:
+OpenAPI-документация доступна по адресу:
 
 ```text
 http://localhost:8000/docs
@@ -48,70 +55,80 @@ http://localhost:8000/docs
 
 ## Docker
 
-Run the API, worker, PostgreSQL, and Redis:
+Запуск API, worker, PostgreSQL и Redis:
 
 ```bash
 docker compose up --build
 ```
 
-The API exposes:
+Health endpoints:
 
-- `GET /health/live` - process liveness
-- `GET /health/ready` - PostgreSQL and Redis readiness
+- `GET /health/live` - проверка, что процесс API запущен
+- `GET /health/ready` - проверка готовности PostgreSQL и Redis
 
-## Verification
+## Проверки
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy src tests
-uv run pytest --cov=src
+uv run pytest --cov=src --cov-fail-under=60
 uv run pre-commit run --all-files
 ```
 
-Current test coverage focuses on the public API contract, health endpoint,
-schema normalization, enum stability, and webhook URL safety checks.
+Текущие тесты покрывают публичный API-контракт, health endpoint, нормализацию
+схем, стабильность enum-значений, безопасность webhook URL и основные
+бизнес-сценарии сервисов.
 
 ## CI/CD
 
-GitHub Actions runs a quality gate on every pull request and push to `main`:
+GitHub Actions запускает quality gate на каждый pull request и push в `main`:
 
-- Ruff linting and format checks
-- Mypy static type checking
-- Pytest with coverage
+- Ruff linting и проверка форматирования
+- Проверка типов через Mypy
+- Pytest с coverage
+- Coverage gate с минимальным порогом
 - Pre-commit hooks
-- Docker image build
+- Security scan через Bandit
+- Аудит Python-зависимостей через pip-audit
+- Сборка Docker image
 
-On pushes to `main` and version tags such as `v1.0.0`, the pipeline publishes
-the Docker image to GitHub Container Registry:
+При push в `main` и при version tags, например `v1.0.0`, pipeline публикует
+Docker image в GitHub Container Registry:
 
 ```text
 ghcr.io/<owner>/<repo>
 ```
 
-Images are tagged by branch, git tag, and commit SHA. Production deployments
-should pull a published image, run `alembic upgrade head`, then start the API
-and worker containers with production environment variables.
+Images тегируются по branch, git tag и commit SHA. Production deployment должен
+забрать опубликованный image, выполнить `alembic upgrade head`, затем запустить
+API и worker containers с production environment variables.
 
 ## API Flow
 
-1. Register with `POST /api/v1/auth/register`.
-2. Login with `POST /api/v1/auth/login`.
-3. Create an organization with `POST /api/v1/organizations`.
-4. Create a project with `POST /api/v1/organizations/{organization_id}/projects`.
-5. Create and update tasks with `/api/v1/projects/{project_id}/tasks` and
+1. Регистрация через `POST /api/v1/auth/register`.
+2. Login через `POST /api/v1/auth/login`.
+3. Создание организации через `POST /api/v1/organizations`.
+4. Создание проекта через
+   `POST /api/v1/organizations/{organization_id}/projects`.
+5. Создание и обновление задач через `/api/v1/projects/{project_id}/tasks` и
    `/api/v1/tasks/{task_id}`.
-6. Subscribe to task events with
+6. Подписка на события задач через
    `POST /api/v1/organizations/{organization_id}/webhooks`.
 
-Task updates require the current `version` field. If another client updates the
-task first, the API returns `409 task_version_conflict`.
+Обновление задачи требует актуальное поле `version`. Если другой клиент успел
+изменить задачу раньше, API вернет `409 task_version_conflict`.
 
 ## Production Notes
 
-- Set strong `APP_SECRET_KEY`, `POSTGRES_PASSWORD`, and
-  `WEBHOOK_SECRET_ENCRYPTION_KEY` in production.
-- Run Alembic migrations explicitly before deploying new application code.
-- Keep webhook targets HTTPS-only in production.
-- The worker processes outbox events independently from request handling, so
-  webhook failures do not roll back user-facing task operations.
+- В production нужно задать сильные `APP_SECRET_KEY`, `POSTGRES_PASSWORD` и
+  `WEBHOOK_SECRET_ENCRYPTION_KEY`.
+- Alembic-миграции запускаются явно перед выкладкой нового кода.
+- В production webhook targets должны использовать HTTPS.
+- Worker обрабатывает outbox events отдельно от request handling, поэтому
+  ошибки доставки webhook не откатывают пользовательские изменения задач.
+
+Подробнее:
+
+- [Архитектура](docs/ARCHITECTURE.md)
+- [Деплой](docs/DEPLOYMENT.md)

@@ -1,6 +1,6 @@
 from pwdlib import PasswordHash
 
-PASSWORD_ALGORITHM = "argon2id"
+PASSWORD_ALGORITHM = "argon2id"  # nosec B105
 
 password_hash = PasswordHash.recommended()
 
