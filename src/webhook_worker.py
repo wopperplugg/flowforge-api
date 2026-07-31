@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import signal
 
 import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
@@ -47,14 +48,27 @@ async def run_worker() -> None:
         ensure=True,
     )
 
+    stop_event = asyncio.Event()
+
+    def ask_exit(sig_name: str) -> None:
+        logger.warning(f"Received signal {sig_name}. Initiating graceful shutdown")
+        stop_event.set()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, ask_exit, sig.name)
+
     logger.info("Webhook worker started")
 
     try:
         await queue.consume(process_message)
-        await asyncio.Future()
+        await stop_event.wait()
+        logger.info("Stop event received.")
     finally:
+        logger.info("Closing channel and connection gracefully...")
         await channel.close()
         await connection.close()
+        logger.info("Worker shut down successfully.")
 
 
 def main() -> None:
