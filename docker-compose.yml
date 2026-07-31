@@ -45,11 +45,13 @@ services:
     build: . 
     command: python -m src.webhook_worker
     environment:
-      POSTGRES_HOST: postgres
-      REDIS_HOST: redis
-      REBBITMQ_DSN: amqp://flowforge:flowforge@rabbitmq:5672/
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: flowforge
+      RABBITMQ_PASSWORD: flowforge
+      RABBITMQ_VHOST: /
     depends_on:
-      postres:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -68,6 +70,10 @@ services:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
       RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: flowforge
+      RABBITMQ_PASSWORD: flowforge
+      RABBITMQ_VHOST: /
     volumes:
       - .:/app
     depends_on:

@@ -7,6 +7,7 @@ import pytest
 
 from src import worker
 from src.common.enums import OutboxStatus
+from src.messaging.contracts import OutboxMessage
 from src.outbox.models import OutboxEvent
 from src.outbox.repository import OutboxRepository
 
@@ -112,6 +113,19 @@ async def test_outbox_repository_claim_and_mark_states() -> None:
     assert event.status.value == OutboxStatus.FAILED.value
 
 
+def test_build_outbox_message() -> None:
+    event = make_outbox_event()
+
+    message = worker.build_outbox_message(event)
+
+    assert message.event_id == event.id
+    assert message.event_type == event.event_type
+    assert message.aggregate_type == event.aggregate_type
+    assert message.aggregate_id == event.aggregate_id
+    assert message.occurred_at == event.created_at
+    assert message.payload == event.payload
+
+
 @pytest.mark.asyncio
 async def test_worker_processes_successful_and_failed_events(
     monkeypatch: pytest.MonkeyPatch,
@@ -119,36 +133,61 @@ async def test_worker_processes_successful_and_failed_events(
     events = [make_outbox_event(), make_outbox_event()]
     marked_processed: list[uuid.UUID] = []
     marked_failed: list[uuid.UUID] = []
+    published_messages: list[OutboxMessage] = []
 
     class FakeRepository:
         def __init__(self, session: object) -> None:
             self.session = session
 
-        async def claim_pending(self, batch_size: int) -> list[OutboxEvent]:
+        async def claim_pending(
+            self,
+            batch_size: int,
+        ) -> list[OutboxEvent]:
             return events
 
-        async def mark_processed(self, event: OutboxEvent) -> None:
+        async def mark_processed(
+            self,
+            event: OutboxEvent,
+        ) -> None:
             marked_processed.append(event.id)
 
-        async def mark_failed_or_retry(self, event: OutboxEvent, error: str) -> None:
+        async def mark_failed_or_retry(
+            self,
+            event: OutboxEvent,
+            error: str,
+        ) -> None:
             marked_failed.append(event.id)
 
-    async def fake_deliver(
-        session: object,
-        *,
-        event_id: uuid.UUID,
-        event_type: str,
-        payload: dict[str, object],
-    ) -> None:
-        if event_id == events[1].id:
-            raise RuntimeError("delivery failed")
+    class FakePublisher:
+        async def publish(
+            self,
+            message: OutboxMessage,
+        ) -> None:
+            published_messages.append(message)
 
-    monkeypatch.setattr(worker, "async_session_maker", lambda: FakeWorkerSession())
-    monkeypatch.setattr(worker, "OutboxRepository", FakeRepository)
-    monkeypatch.setattr(worker, "deliver_webhooks_for_outbox_event", fake_deliver)
+            if message.event_id == events[1].id:
+                raise RuntimeError("publish failed")
 
-    processed = await worker.process_outbox_once(batch_size=2)
+    monkeypatch.setattr(
+        worker,
+        "async_session_maker",
+        lambda: FakeWorkerSession(),
+    )
+    monkeypatch.setattr(
+        worker,
+        "OutboxRepository",
+        FakeRepository,
+    )
+
+    processed = await worker.process_outbox_once(
+        FakePublisher(),  # type: ignore[arg-type]
+        batch_size=2,
+    )
 
     assert processed == 1
     assert marked_processed == [events[0].id]
     assert marked_failed == [events[1].id]
+
+    assert len(published_messages) == 2
+    assert published_messages[0].event_id == events[0].id
+    assert published_messages[1].event_id == events[1].id
