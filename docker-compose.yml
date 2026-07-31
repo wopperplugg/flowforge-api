@@ -40,6 +40,24 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+ 
+  webhook-worker:
+    build: . 
+    command: python -m src.webhook_worker
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      REBBITMQ_DSN: amqp://flowforge:flowforge@rabbitmq:5672/
+    depends_on:
+      postres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    restart: unless-stopped
 
   worker:
     build: .

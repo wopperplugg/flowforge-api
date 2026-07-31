@@ -3,7 +3,7 @@ from aio_pika.abc import AbstractChannel, AbstractRobustConnection
 
 EVENTS_EXCHANGE = "flowforge.events"
 DEAD_LETTER_EXCHANGE = "flowforge.dlx"
-WEBHOOKS_QUEUE = "webhooks.events"
+WEBHOOK_QUEUE = "webhooks.events"
 WEBHOOKS_DLQ = "webhooks.events.dlq"
 
 
@@ -24,7 +24,7 @@ async def declare_webhook_topology(connection: AbstractRobustConnection) -> None
         )
 
         webhook_queue = await channel.declare_queue(
-            WEBHOOKS_QUEUE,
+            WEBHOOK_QUEUE,
             durable=True,
             arguments={
                 "x-dead-letter-exchange": DEAD_LETTER_EXCHANGE,
