@@ -11,6 +11,7 @@ from src.auth import models as auth_models  # noqa: F401
 from src.config import settings
 from src.database import Base
 from src.idempotency.models import IdempotencyKey  # noqa: F401
+from src.messaging.models import ProcessedMessage  # noqa: F401
 from src.organizations.models import Organization, OrganizationMember  # noqa: F401
 from src.outbox.models import OutboxEvent  # noqa: F401
 from src.projects.models import Project  # noqa: F401

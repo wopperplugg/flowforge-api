@@ -39,6 +39,8 @@ def create_session_maker_mock() -> tuple[
 
     session = MagicMock()
     session.begin.return_value = transaction_context
+    session.scalar = AsyncMock(return_value=None)
+    session.add = MagicMock()
 
     session_context = MagicMock()
     session_context.__aenter__ = AsyncMock(
@@ -85,6 +87,7 @@ async def test_process_message_delivers_and_acknowledges_valid_event(
         await process_message(message)
 
     delivery_mock.assert_awaited_once()
+    session.add.assert_called_once()
 
     delivery_call = delivery_mock.await_args
 
@@ -157,6 +160,34 @@ async def test_process_message_rejects_failed_delivery(
         requeue=False,
     )
     message.ack.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_message_acknowledges_duplicate_without_delivery(
+    valid_message_body: bytes,
+) -> None:
+    message = create_message(valid_message_body)
+    session_maker, session = create_session_maker_mock()
+    session.scalar.return_value = uuid4()
+
+    delivery_mock = AsyncMock()
+
+    with (
+        patch(
+            "src.webhook_worker.async_session_maker",
+            session_maker,
+        ),
+        patch(
+            "src.webhook_worker.deliver_webhooks_for_outbox_event",
+            new=delivery_mock,
+        ),
+    ):
+        await process_message(message)
+
+    delivery_mock.assert_not_awaited()
+    session.add.assert_not_called()
+    message.ack.assert_awaited_once_with()
+    message.reject.assert_not_awaited()
 
 
 @pytest.mark.asyncio

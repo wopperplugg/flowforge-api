@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from src.config import settings
 from src.database import async_session_maker
 from src.messaging.contracts import OutboxMessage
+from src.messaging.idempotency import mark_processed, was_processed
 from src.messaging.topology import (
     WEBHOOK_QUEUE,
     declare_webhook_topology,
@@ -17,6 +18,8 @@ from src.messaging.topology import (
 from src.webhooks.delivery import deliver_webhooks_for_outbox_event
 
 logger = logging.getLogger(__name__)
+
+CONSUMER_NAME = "webhook_worker"
 
 
 async def process_message(message: AbstractIncomingMessage) -> None:
@@ -38,12 +41,21 @@ async def process_message(message: AbstractIncomingMessage) -> None:
     try:
         async with async_session_maker() as session:
             async with session.begin():
-                await deliver_webhooks_for_outbox_event(
-                    session,
-                    event_id=event.event_id,
-                    event_type=event.event_type,
-                    payload=event.payload,
+                duplicate = await was_processed(
+                    session, message_id=event.event_id, consumer_name=CONSUMER_NAME
                 )
+
+                if not duplicate:
+                    await deliver_webhooks_for_outbox_event(
+                        session,
+                        event_id=event.event_id,
+                        event_type=event.event_type,
+                        payload=event.payload,
+                    )
+                    mark_processed(
+                        session, message_id=event.event_id, consumer_name=CONSUMER_NAME
+                    )
+
     except SQLAlchemyError:
         logger.exception(
             "Database error while processing webhook event",
@@ -59,6 +71,16 @@ async def process_message(message: AbstractIncomingMessage) -> None:
         await message.reject(requeue=False)
         return
     await message.ack()
+
+    if duplicate:
+        logger.info(
+            "webhook event already processed",
+            extra={
+                "event_id": str(event.event_id),
+                "consumer_name": CONSUMER_NAME,
+            },
+        )
+        return
 
     logger.info(
         "Webhook event processed",
