@@ -57,15 +57,32 @@ async def test_declare_webhook_topology_declares_bindings_and_closes_channel() -
     channel.close = AsyncMock()
 
     events_exchange = MagicMock()
+    retry_exchange = MagicMock()
     dead_letter_exchange = MagicMock()
     webhook_queue = MagicMock()
     webhook_queue.bind = AsyncMock()
+    retry_10s_queue = MagicMock()
+    retry_10s_queue.bind = AsyncMock()
+    retry_60s_queue = MagicMock()
+    retry_60s_queue.bind = AsyncMock()
+    retry_300s_queue = MagicMock()
+    retry_300s_queue.bind = AsyncMock()
     dlq = MagicMock()
     dlq.bind = AsyncMock()
 
     connection.channel.return_value = channel
-    channel.declare_exchange.side_effect = [events_exchange, dead_letter_exchange]
-    channel.declare_queue.side_effect = [webhook_queue, dlq]
+    channel.declare_exchange.side_effect = [
+        events_exchange,
+        retry_exchange,
+        dead_letter_exchange,
+    ]
+    channel.declare_queue.side_effect = [
+        webhook_queue,
+        retry_10s_queue,
+        retry_60s_queue,
+        retry_300s_queue,
+        dlq,
+    ]
 
     await topology.declare_webhook_topology(connection)
 
@@ -75,23 +92,71 @@ async def test_declare_webhook_topology_declares_bindings_and_closes_channel() -
         durable=True,
     )
     channel.declare_exchange.assert_any_await(
-        topology.DEAD_LETTER_EXCHANGE,
-        ExchangeType.FANOUT,
+        topology.RETRY_EXCHANGE,
+        ExchangeType.DIRECT,
+        durable=True,
+    )
+    channel.declare_exchange.assert_any_await(
+        topology.DLX_EXCHANGE,
+        ExchangeType.DIRECT,
         durable=True,
     )
     channel.declare_queue.assert_any_await(
         topology.WEBHOOK_QUEUE,
         durable=True,
         arguments={
-            "x-dead-letter-exchange": topology.DEAD_LETTER_EXCHANGE,
-            "x-dead-letter-routing-key": topology.WEBHOOKS_DLQ,
+            "x-dead-letter-exchange": topology.DLX_EXCHANGE,
+            "x-dead-letter-routing-key": topology.WEBHOOK_DLQ_ROUTING_KEY,
+        },
+    )
+    channel.declare_queue.assert_any_await(
+        topology.WEBHOOK_RETRY_10S_QUEUE,
+        durable=True,
+        arguments={
+            "x-message-ttl": 10_000,
+            "x-dead-letter-exchange": topology.EVENTS_EXCHANGE,
+            "x-dead-letter-routing-key": topology.WEBHOOK_ROUTING_KEY,
+        },
+    )
+    channel.declare_queue.assert_any_await(
+        topology.WEBHOOK_RETRY_60S_QUEUE,
+        durable=True,
+        arguments={
+            "x-message-ttl": 60_000,
+            "x-dead-letter-exchange": topology.EVENTS_EXCHANGE,
+            "x-dead-letter-routing-key": topology.WEBHOOK_ROUTING_KEY,
+        },
+    )
+    channel.declare_queue.assert_any_await(
+        topology.WEBHOOK_RETRY_300S_QUEUE,
+        durable=True,
+        arguments={
+            "x-message-ttl": 300_000,
+            "x-dead-letter-exchange": topology.EVENTS_EXCHANGE,
+            "x-dead-letter-routing-key": topology.WEBHOOK_ROUTING_KEY,
         },
     )
     channel.declare_queue.assert_any_await(topology.WEBHOOKS_DLQ, durable=True)
-    webhook_queue.bind.assert_awaited_once_with(events_exchange, routing_key="#")
+    webhook_queue.bind.assert_any_await(events_exchange, routing_key="task.*")
+    webhook_queue.bind.assert_any_await(
+        events_exchange,
+        routing_key=topology.WEBHOOK_ROUTING_KEY,
+    )
+    retry_10s_queue.bind.assert_awaited_once_with(
+        retry_exchange,
+        routing_key=topology.WEBHOOK_RETRY_10S_ROUTING_KEY,
+    )
+    retry_60s_queue.bind.assert_awaited_once_with(
+        retry_exchange,
+        routing_key=topology.WEBHOOK_RETRY_60S_ROUTING_KEY,
+    )
+    retry_300s_queue.bind.assert_awaited_once_with(
+        retry_exchange,
+        routing_key=topology.WEBHOOK_RETRY_300S_ROUTING_KEY,
+    )
     dlq.bind.assert_awaited_once_with(
         dead_letter_exchange,
-        routing_key=topology.WEBHOOKS_DLQ,
+        routing_key=topology.WEBHOOK_DLQ_ROUTING_KEY,
     )
     channel.close.assert_awaited_once_with()
 

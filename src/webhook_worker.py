@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import signal
+from typing import cast
 
 import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
@@ -11,15 +12,40 @@ from src.config import settings
 from src.database import async_session_maker
 from src.messaging.contracts import OutboxMessage
 from src.messaging.idempotency import try_mark_processed
+from src.messaging.retry import RetryChannel, publish_retry
 from src.messaging.topology import (
     WEBHOOK_QUEUE,
     declare_webhook_topology,
 )
 from src.webhooks.delivery import deliver_webhooks_for_outbox_event
+from src.webhooks.exceptions import NonRetryableWebhookError, RetryableWebhookError
 
 logger = logging.getLogger(__name__)
 
-CONSUMER_NAME = "webhook_worker"
+CONSUMER_NAME = "webhook-worker"
+
+
+async def handle_retry(
+    message: AbstractIncomingMessage,
+    *,
+    event_id: str,
+) -> None:
+    published = await publish_retry(cast(RetryChannel, message.channel), message)
+
+    if published:
+        await message.ack()
+
+        logger.info(
+            "Webhook event scheduled for retry",
+            extra={"event_id": event_id},
+        )
+        return
+
+    logger.warning(
+        "Webhook event reached max retry attempts, sending to DLQ",
+        extra={"event_id": event_id},
+    )
+    await message.reject(requeue=False)
 
 
 async def process_message(message: AbstractIncomingMessage) -> None:
@@ -57,13 +83,25 @@ async def process_message(message: AbstractIncomingMessage) -> None:
                         payload=event.payload,
                     )
 
-    except SQLAlchemyError:
+    except NonRetryableWebhookError:
         logger.exception(
-            "Database error while processing webhook event",
+            "Non-retryable webhook error",
             extra={"event_id": str(event.event_id)},
         )
         await message.reject(requeue=False)
         return
+
+    except (RetryableWebhookError, SQLAlchemyError):
+        logger.exception(
+            "Retryable webhook error",
+            extra={"event_id": str(event.event_id)},
+        )
+        await handle_retry(
+            message,
+            event_id=str(event.event_id),
+        )
+        return
+
     except Exception:
         logger.exception(
             "Webhook delivery failed",
@@ -71,6 +109,7 @@ async def process_message(message: AbstractIncomingMessage) -> None:
         )
         await message.reject(requeue=False)
         return
+
     await message.ack()
 
     if duplicate:

@@ -3,9 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.messaging.contracts import OutboxMessage
+from src.messaging.retry import RETRY_HEADERS
+from src.messaging.topology import RETRY_EXCHANGE, WEBHOOK_RETRY_10S_ROUTING_KEY
 from src.webhook_worker import process_message
+from src.webhooks.exceptions import RetryableWebhookError
 
 
 @pytest.fixture
@@ -60,8 +64,20 @@ def create_session_maker_mock() -> tuple[
 def create_message(body: bytes) -> MagicMock:
     message = MagicMock()
     message.body = body
+    message.headers = {}
+    message.message_id = str(uuid4())
+    message.correlation_id = None
+    message.content_type = "application/json"
     message.ack = AsyncMock()
     message.reject = AsyncMock()
+
+    retry_exchange = MagicMock()
+    retry_exchange.publish = AsyncMock()
+
+    channel = MagicMock()
+    channel.get_exchange = AsyncMock(return_value=retry_exchange)
+    message.channel = channel
+
     return message
 
 
@@ -133,14 +149,14 @@ async def test_process_message_passes_event_data_to_delivery(
 
 
 @pytest.mark.asyncio
-async def test_process_message_rejects_failed_delivery(
+async def test_process_message_retries_failed_delivery(
     valid_message_body: bytes,
 ) -> None:
     message = create_message(valid_message_body)
     session_maker, _ = create_session_maker_mock()
 
     delivery_mock = AsyncMock(
-        side_effect=RuntimeError("Endpoint unavailable"),
+        side_effect=RetryableWebhookError("Endpoint unavailable"),
     )
 
     with (
@@ -156,9 +172,46 @@ async def test_process_message_rejects_failed_delivery(
         await process_message(message)
 
     delivery_mock.assert_awaited_once()
-    message.reject.assert_awaited_once_with(
-        requeue=False,
+    message.channel.get_exchange.assert_awaited_once_with(
+        RETRY_EXCHANGE,
+        ensure=True,
     )
+    retry_exchange = message.channel.get_exchange.return_value
+    retry_exchange.publish.assert_awaited_once()
+    assert retry_exchange.publish.await_args.kwargs["routing_key"] == (
+        WEBHOOK_RETRY_10S_ROUTING_KEY
+    )
+    message.ack.assert_awaited_once_with()
+    message.reject.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_message_rejects_failed_delivery_after_max_retries(
+    valid_message_body: bytes,
+) -> None:
+    message = create_message(valid_message_body)
+    message.headers = {RETRY_HEADERS: 3}
+    session_maker, _ = create_session_maker_mock()
+
+    delivery_mock = AsyncMock(
+        side_effect=RetryableWebhookError("Endpoint unavailable"),
+    )
+
+    with (
+        patch(
+            "src.webhook_worker.async_session_maker",
+            session_maker,
+        ),
+        patch(
+            "src.webhook_worker.deliver_webhooks_for_outbox_event",
+            new=delivery_mock,
+        ),
+    ):
+        await process_message(message)
+
+    delivery_mock.assert_awaited_once()
+    message.channel.get_exchange.assert_not_awaited()
+    message.reject.assert_awaited_once_with(requeue=False)
     message.ack.assert_not_awaited()
 
 
@@ -191,12 +244,12 @@ async def test_process_message_acknowledges_duplicate_without_delivery(
 
 
 @pytest.mark.asyncio
-async def test_process_message_rejects_database_error_before_delivery(
+async def test_process_message_retries_database_error_before_delivery(
     valid_message_body: bytes,
 ) -> None:
     message = create_message(valid_message_body)
     session_maker, session = create_session_maker_mock()
-    session.scalar.side_effect = RuntimeError("database unavailable")
+    session.scalar.side_effect = SQLAlchemyError("database unavailable")
 
     delivery_mock = AsyncMock()
 
@@ -213,8 +266,12 @@ async def test_process_message_rejects_database_error_before_delivery(
         await process_message(message)
 
     delivery_mock.assert_not_awaited()
-    message.reject.assert_awaited_once_with(requeue=False)
-    message.ack.assert_not_awaited()
+    message.channel.get_exchange.assert_awaited_once_with(
+        RETRY_EXCHANGE,
+        ensure=True,
+    )
+    message.ack.assert_awaited_once_with()
+    message.reject.assert_not_awaited()
 
 
 @pytest.mark.asyncio
