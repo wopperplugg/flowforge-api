@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import TracebackType
 from typing import Self
 
@@ -191,3 +191,50 @@ async def test_worker_processes_successful_and_failed_events(
     assert len(published_messages) == 2
     assert published_messages[0].event_id == events[0].id
     assert published_messages[1].event_id == events[1].id
+
+
+@pytest.mark.asyncio
+async def test_worker_returns_zero_when_no_outbox_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeRepository:
+        def __init__(self, session: object) -> None:
+            self.session = session
+
+        async def claim_pending(self, batch_size: int) -> list[OutboxEvent]:
+            assert batch_size == 50
+            return []
+
+    class FakePublisher:
+        async def publish(self, message: OutboxMessage) -> None:
+            raise AssertionError("publish should not be called")
+
+    monkeypatch.setattr(worker, "async_session_maker", lambda: FakeWorkerSession())
+    monkeypatch.setattr(worker, "OutboxRepository", FakeRepository)
+
+    processed = await worker.process_outbox_once(
+        FakePublisher(),  # type: ignore[arg-type]
+        batch_size=50,
+    )
+
+    assert processed == 0
+
+
+@pytest.mark.asyncio
+async def test_outbox_repository_retry_backoff_is_capped() -> None:
+    event = make_outbox_event()
+    event.attempts = 8
+    repository = OutboxRepository(FakeOutboxSession([]))  # type: ignore[arg-type]
+
+    before = datetime.now(UTC)
+    await repository.mark_failed_or_retry(event, "temporary", max_attempts=20)
+    after = datetime.now(UTC)
+
+    assert event.attempts == 9
+    assert event.status == OutboxStatus.PENDING
+    assert event.next_attempt_at is not None
+    assert (
+        before + timedelta(seconds=300)
+        <= event.next_attempt_at
+        <= after + timedelta(seconds=300)
+    )

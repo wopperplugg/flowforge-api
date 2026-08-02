@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -75,6 +76,13 @@ async def test_publish_sends_persistent_message(
     assert published_message.timestamp == outbox_message.occurred_at
     assert published_message.delivery_mode == DeliveryMode.PERSISTENT
     assert published_message.content_type == "application/json"
+    assert published_message.headers == {
+        "aggregate_type": outbox_message.aggregate_type,
+        "aggregate_id": str(outbox_message.aggregate_id),
+    }
+    assert json.loads(published_message.body) == json.loads(
+        outbox_message.model_dump_json()
+    )
 
     exchange.publish.assert_awaited_once_with(
         published_message,
@@ -120,3 +128,36 @@ async def test_close_closes_channel_and_connection() -> None:
     assert publisher._channel is None
     assert publisher._connection is None
     assert publisher._exchange is None
+
+
+@pytest.mark.asyncio
+async def test_close_skips_already_closed_channel() -> None:
+    publisher = RabbitMQPublisher("amqp://flowforge:flowforge@localhost:5672/")
+
+    channel = MagicMock()
+    channel.is_closed = True
+    channel.close = AsyncMock()
+
+    connection = MagicMock()
+    connection.close = AsyncMock()
+
+    publisher._channel = channel
+    publisher._connection = connection
+
+    await publisher.close()
+
+    channel.close.assert_not_awaited()
+    connection.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_context_manager_connects_and_closes() -> None:
+    publisher = RabbitMQPublisher("amqp://flowforge:flowforge@localhost:5672/")
+    publisher.connect = AsyncMock()  # type: ignore[method-assign]
+    publisher.close = AsyncMock()  # type: ignore[method-assign]
+
+    async with publisher as entered:
+        assert entered is publisher
+
+    publisher.connect.assert_awaited_once_with()
+    publisher.close.assert_awaited_once_with()

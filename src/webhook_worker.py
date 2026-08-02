@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from src.config import settings
 from src.database import async_session_maker
 from src.messaging.contracts import OutboxMessage
-from src.messaging.idempotency import mark_processed, was_processed
+from src.messaging.idempotency import try_mark_processed
 from src.messaging.topology import (
     WEBHOOK_QUEUE,
     declare_webhook_topology,
@@ -41,19 +41,20 @@ async def process_message(message: AbstractIncomingMessage) -> None:
     try:
         async with async_session_maker() as session:
             async with session.begin():
-                duplicate = await was_processed(
-                    session, message_id=event.event_id, consumer_name=CONSUMER_NAME
+                acquired = await try_mark_processed(
+                    session,
+                    message_id=event.event_id,
+                    consumer_name=CONSUMER_NAME,
                 )
 
-                if not duplicate:
+                duplicate = not acquired
+
+                if acquired:
                     await deliver_webhooks_for_outbox_event(
                         session,
                         event_id=event.event_id,
                         event_type=event.event_type,
                         payload=event.payload,
-                    )
-                    mark_processed(
-                        session, message_id=event.event_id, consumer_name=CONSUMER_NAME
                     )
 
     except SQLAlchemyError:

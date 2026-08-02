@@ -35,6 +35,58 @@ class FakeWebhookRepository:
         ]
 
 
+class EmptyWebhookRepository:
+    def __init__(self, session: object) -> None:
+        self.session = session
+
+    async def list_active_for_event(
+        self,
+        organization_id: uuid.UUID,
+        event_type: str,
+    ) -> list[WebhookSubscription]:
+        return []
+
+
+class MixedWebhookRepository:
+    def __init__(self, session: object) -> None:
+        self.session = session
+
+    async def list_active_for_event(
+        self,
+        organization_id: uuid.UUID,
+        event_type: str,
+    ) -> list[WebhookSubscription]:
+        return [
+            WebhookSubscription(
+                id=uuid.uuid4(),
+                organization_id=organization_id,
+                url="https://example.com/no-secret",
+                secret_hash="hash",
+                secret_encrypted=None,
+                event_types=[event_type],
+                is_active=True,
+            ),
+            WebhookSubscription(
+                id=uuid.uuid4(),
+                organization_id=organization_id,
+                url="http://localhost/hook",
+                secret_hash="hash",
+                secret_encrypted="encrypted",
+                event_types=[event_type],
+                is_active=True,
+            ),
+            WebhookSubscription(
+                id=uuid.uuid4(),
+                organization_id=organization_id,
+                url="https://example.com/hook",
+                secret_hash="hash",
+                secret_encrypted="encrypted",
+                event_types=[event_type],
+                is_active=True,
+            ),
+        ]
+
+
 class FakeResponse:
     status_code = 202
     text = "accepted"
@@ -57,6 +109,7 @@ class FailingResponse:
 
 class FakeAsyncClient:
     response: object = FakeResponse()
+    calls: list[tuple[str, dict[str, object], dict[str, str]]] = []
 
     def __init__(self, timeout: float) -> None:
         self.timeout = timeout
@@ -75,6 +128,9 @@ class FakeAsyncClient:
         headers: dict[str, str],
     ) -> object:
         assert headers["X-FlowForge-Signature"].startswith("sha256=")
+        self.calls.append((url, json, headers))
+        if isinstance(self.response, BaseException):
+            raise self.response
         return self.response
 
 
@@ -130,6 +186,7 @@ async def test_deliver_webhooks_skips_missing_context_and_records_delivery(
     )
 
     assert len(session.added) == 1
+    assert FakeAsyncClient.calls[-1][0] == "https://example.com/hook"
 
 
 @pytest.mark.asyncio
@@ -161,6 +218,99 @@ async def test_deliver_webhooks_records_http_failure_without_raising(
     assert isinstance(recorded, WebhookDelivery)
     assert recorded.status_code == 404
     assert recorded.response_body == "not found"
+    FakeAsyncClient.response = FakeResponse()
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhooks_skips_when_no_subscriptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeDeliverySession()
+
+    async def fake_resolve(session: object, task_id: uuid.UUID) -> uuid.UUID:
+        return uuid.uuid4()
+
+    class FailingAsyncClient:
+        def __init__(self, timeout: float) -> None:
+            raise AssertionError("HTTP client should not be created")
+
+    monkeypatch.setattr(delivery, "resolve_task_organization_id", fake_resolve)
+    monkeypatch.setattr(delivery, "WebhookRepository", EmptyWebhookRepository)
+    monkeypatch.setattr(httpx, "AsyncClient", FailingAsyncClient)
+
+    await delivery.deliver_webhooks_for_outbox_event(
+        session,  # type: ignore[arg-type]
+        event_id=uuid.uuid4(),
+        event_type="task.created",
+        payload={"task_id": str(uuid.uuid4())},
+    )
+
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhooks_skips_unsafe_or_unusable_subscriptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeDeliverySession()
+    organization_id = uuid.uuid4()
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.response = FakeResponse()
+
+    async def fake_resolve(session: object, task_id: uuid.UUID) -> uuid.UUID:
+        return organization_id
+
+    monkeypatch.setattr(delivery, "resolve_task_organization_id", fake_resolve)
+    monkeypatch.setattr(delivery, "WebhookRepository", MixedWebhookRepository)
+    monkeypatch.setattr(
+        delivery,
+        "is_safe_webhook_url",
+        lambda url: url == "https://example.com/hook",
+    )
+    monkeypatch.setattr(delivery, "decrypt_webhook_secret", lambda encrypted: "secret")
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    await delivery.deliver_webhooks_for_outbox_event(
+        session,  # type: ignore[arg-type]
+        event_id=uuid.uuid4(),
+        event_type="task.created",
+        payload={"task_id": str(uuid.uuid4())},
+    )
+
+    assert len(session.added) == 1
+    assert [call[0] for call in FakeAsyncClient.calls] == ["https://example.com/hook"]
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhooks_records_network_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeDeliverySession()
+    organization_id = uuid.uuid4()
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.response = httpx.ConnectError("connection refused")
+
+    async def fake_resolve(session: object, task_id: uuid.UUID) -> uuid.UUID:
+        return organization_id
+
+    monkeypatch.setattr(delivery, "resolve_task_organization_id", fake_resolve)
+    monkeypatch.setattr(delivery, "WebhookRepository", FakeWebhookRepository)
+    monkeypatch.setattr(delivery, "is_safe_webhook_url", lambda url: True)
+    monkeypatch.setattr(delivery, "decrypt_webhook_secret", lambda encrypted: "secret")
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    await delivery.deliver_webhooks_for_outbox_event(
+        session,  # type: ignore[arg-type]
+        event_id=uuid.uuid4(),
+        event_type="task.created",
+        payload={"task_id": str(uuid.uuid4())},
+    )
+
+    assert len(session.added) == 1
+    recorded = session.added[0]
+    assert isinstance(recorded, WebhookDelivery)
+    assert recorded.status_code is None
+    assert recorded.response_body == "connection refused"
     FakeAsyncClient.response = FakeResponse()
 
 
