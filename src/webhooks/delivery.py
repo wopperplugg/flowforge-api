@@ -73,6 +73,8 @@ async def deliver_webhooks_for_outbox_event(
                 status_code = response.status_code
                 response_body = response.text[:2000]
                 response.raise_for_status()
+            except httpx.HTTPError as exc:
+                response_body = response_body or str(exc)
             finally:
                 session.add(
                     WebhookDelivery(

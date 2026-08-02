@@ -13,6 +13,7 @@ RUN addgroup --system app && adduser --system --ingroup app app \
 
 COPY pyproject.toml ./
 COPY src ./src
+COPY scripts ./scripts
 RUN pip install --upgrade pip \
     && pip install .
 

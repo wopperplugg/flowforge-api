@@ -1,4 +1,6 @@
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +25,7 @@ class TaskService:
     async def create_task(
         self, project_id: uuid.UUID, data: TaskCreate, user: User
     ) -> Task:
-        async with self.session.begin():
+        async with self._transaction():
             project = await self.projects.get_accessible_project(project_id, user.id)
             if project is None:
                 raise ProjectNotFoundError()
@@ -78,7 +80,7 @@ class TaskService:
     async def update_task(
         self, task_id: uuid.UUID, data: TaskUpdate, user: User
     ) -> Task:
-        async with self.session.begin():
+        async with self._transaction():
             task = await self.tasks.get_accessible_task(task_id, user.id)
             if task is None:
                 raise TaskNotFoundError()
@@ -125,7 +127,7 @@ class TaskService:
         data: TaskCommentCreate,
         user: User,
     ) -> TaskComment:
-        async with self.session.begin():
+        async with self._transaction():
             task = await self.tasks.get_accessible_task(task_id, user.id)
             if task is None:
                 raise TaskNotFoundError()
@@ -146,3 +148,11 @@ class TaskService:
         if task is None:
             raise TaskNotFoundError()
         return await self.tasks.list_history(task_id, user.id)
+
+    @asynccontextmanager
+    async def _transaction(self) -> AsyncIterator[None]:
+        if self.session.in_transaction():
+            yield
+            return
+        async with self.session.begin():
+            yield

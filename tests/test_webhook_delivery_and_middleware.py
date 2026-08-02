@@ -10,7 +10,7 @@ from src.common.exceptions import RateLimitExceededError
 from src.config import settings
 from src.infrastructure.rate_limit import RateLimitMiddleware
 from src.webhooks import delivery
-from src.webhooks.models import WebhookSubscription
+from src.webhooks.models import WebhookDelivery, WebhookSubscription
 
 
 class FakeWebhookRepository:
@@ -43,7 +43,21 @@ class FakeResponse:
         return None
 
 
+class FailingResponse:
+    status_code = 404
+    text = "not found"
+
+    def raise_for_status(self) -> None:
+        raise httpx.HTTPStatusError(
+            "not found",
+            request=httpx.Request("POST", "https://example.com/hook"),
+            response=httpx.Response(404),
+        )
+
+
 class FakeAsyncClient:
+    response: object = FakeResponse()
+
     def __init__(self, timeout: float) -> None:
         self.timeout = timeout
 
@@ -59,9 +73,9 @@ class FakeAsyncClient:
         *,
         json: dict[str, object],
         headers: dict[str, str],
-    ) -> FakeResponse:
+    ) -> object:
         assert headers["X-FlowForge-Signature"].startswith("sha256=")
-        return FakeResponse()
+        return self.response
 
 
 class FakeDeliverySession:
@@ -116,6 +130,38 @@ async def test_deliver_webhooks_skips_missing_context_and_records_delivery(
     )
 
     assert len(session.added) == 1
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhooks_records_http_failure_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeDeliverySession()
+    organization_id = uuid.uuid4()
+
+    async def fake_resolve(session: object, task_id: uuid.UUID) -> uuid.UUID:
+        return organization_id
+
+    FakeAsyncClient.response = FailingResponse()
+    monkeypatch.setattr(delivery, "resolve_task_organization_id", fake_resolve)
+    monkeypatch.setattr(delivery, "WebhookRepository", FakeWebhookRepository)
+    monkeypatch.setattr(delivery, "is_safe_webhook_url", lambda url: True)
+    monkeypatch.setattr(delivery, "decrypt_webhook_secret", lambda encrypted: "secret")
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    await delivery.deliver_webhooks_for_outbox_event(
+        session,  # type: ignore[arg-type]
+        event_id=uuid.uuid4(),
+        event_type="task.created",
+        payload={"task_id": str(uuid.uuid4())},
+    )
+
+    assert len(session.added) == 1
+    recorded = session.added[0]
+    assert isinstance(recorded, WebhookDelivery)
+    assert recorded.status_code == 404
+    assert recorded.response_body == "not found"
+    FakeAsyncClient.response = FakeResponse()
 
 
 @pytest.mark.asyncio

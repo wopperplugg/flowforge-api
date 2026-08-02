@@ -47,6 +47,33 @@ uv run alembic upgrade head
 uv run uvicorn src.main:app --reload
 ```
 
+## Демо-данные
+
+После запуска PostgreSQL и миграций можно заполнить все таблицы реалистичными
+данными для ручной проверки приложения:
+
+```bash
+uv run python -m scripts.seed_demo_data
+```
+
+В Docker Compose тот же seed запускается внутри API-контейнера:
+
+```bash
+docker compose exec -T api python -m scripts.seed_demo_data
+```
+
+Скрипт идемпотентный: повторные запуски не создают дубликаты. Он также выдает
+доступ к demo-организации всем уже существующим активным пользователям, чтобы
+их текущие токены не получали пустые списки. Демо-пользователи:
+
+- `admin@flowforge-demo.com`
+- `alice.petrov@flowforge-demo.com`
+- `boris.ivanov@flowforge-demo.com`
+- `clara.smith@flowforge-demo.com`
+- `dmitry.qa@flowforge-demo.com`
+
+Пароль для всех активных demo-аккаунтов: `DemoPass123!`.
+
 OpenAPI-документация доступна по адресу:
 
 ```text

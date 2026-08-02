@@ -30,5 +30,7 @@ async def get_current_user(
     user = await UserRepository(session).get_by_id(user_id)
     if user is None or not user.is_active:
         raise InvalidTokenError()
+    if session.in_transaction():
+        await session.commit()
 
     return user
