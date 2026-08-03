@@ -43,7 +43,10 @@ def get_retry_count(headers: Mapping[str, object]) -> int:
 
 
 async def publish_retry(
-    channel: RetryChannel, message: AbstractIncomingMessage
+    channel: RetryChannel,
+    message: AbstractIncomingMessage,
+    *,
+    correlation_id: str | None = None,
 ) -> bool:
     headers = dict(message.headers or {})
     retry_count = get_retry_count(headers)
@@ -58,7 +61,7 @@ async def publish_retry(
         body=message.body,
         headers=headers,
         message_id=message.message_id,
-        correlation_id=message.correlation_id,
+        correlation_id=message.correlation_id or correlation_id,
         content_type=message.content_type or "application/json",
         delivery_mode=DeliveryMode.PERSISTENT,
     )

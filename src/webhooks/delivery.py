@@ -35,6 +35,7 @@ async def deliver_webhooks_for_outbox_event(
     event_id: uuid.UUID,
     event_type: str,
     payload: dict[str, object],
+    correlation_id: uuid.UUID | None = None,
 ) -> None:
     raw_task_id = payload.get("task_id")
     if raw_task_id is None:
@@ -66,6 +67,9 @@ async def deliver_webhooks_for_outbox_event(
                     json=payload,
                     headers={
                         "X-FlowForge-Event-ID": str(event_id),
+                        "X-FlowForge-Correlation-ID": str(
+                            correlation_id or event_id,
+                        ),
                         "X-FlowForge-Timestamp": str(timestamp),
                         "X-FlowForge-Signature": f"sha256={signature}",
                     },

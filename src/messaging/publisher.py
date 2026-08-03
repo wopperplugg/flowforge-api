@@ -2,7 +2,12 @@ from types import TracebackType
 
 import aio_pika
 from aio_pika import DeliveryMode, ExchangeType, Message
-from aio_pika.abc import AbstractChannel, AbstractExchange, AbstractRobustConnection
+from aio_pika.abc import (
+    AbstractChannel,
+    AbstractExchange,
+    AbstractRobustConnection,
+    FieldValue,
+)
 
 from src.messaging.contracts import OutboxMessage
 
@@ -32,6 +37,18 @@ class RabbitMQPublisher:
         if self._exchange is None:
             raise RuntimeError("RabbitMQ publisher is not connected")
 
+        headers: dict[str, FieldValue] = {
+            "event_version": event.event_version,
+            "aggregate_type": event.aggregate_type,
+            "aggregate_id": str(event.aggregate_id),
+        }
+
+        if event.organization_id is not None:
+            headers["organization_id"] = str(event.organization_id)
+
+        if event.correlation_id is not None:
+            headers["correlation_id"] = str(event.correlation_id)
+
         message = Message(
             body=event.model_dump_json().encode(),
             content_type="application/json",
@@ -39,10 +56,7 @@ class RabbitMQPublisher:
             message_id=str(event.event_id),
             type=event.event_type,
             timestamp=event.occurred_at,
-            headers={
-                "aggregate_type": event.aggregate_type,
-                "aggregate_id": str(event.aggregate_id),
-            },
+            headers=headers,
         )
         await self._exchange.publish(
             message,

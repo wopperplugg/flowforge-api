@@ -77,8 +77,10 @@ async def test_publish_sends_persistent_message(
     assert published_message.delivery_mode == DeliveryMode.PERSISTENT
     assert published_message.content_type == "application/json"
     assert published_message.headers == {
+        "event_version": outbox_message.event_version,
         "aggregate_type": outbox_message.aggregate_type,
         "aggregate_id": str(outbox_message.aggregate_id),
+        "correlation_id": str(outbox_message.correlation_id),
     }
     assert json.loads(published_message.body) == json.loads(
         outbox_message.model_dump_json()

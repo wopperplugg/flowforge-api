@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import TracebackType
@@ -7,6 +8,7 @@ import pytest
 
 from src import worker
 from src.common.enums import OutboxStatus
+from src.config import settings
 from src.messaging.contracts import OutboxMessage
 from src.outbox.models import OutboxEvent
 from src.outbox.repository import OutboxRepository
@@ -71,6 +73,20 @@ class FakeWorkerSession:
     def begin(self) -> FakeBegin:
         self.begin_count += 1
         return FakeBegin()
+
+
+class FakeStopEvent:
+    def __init__(self) -> None:
+        self.wait_count = 0
+        self._is_set = False
+
+    def is_set(self) -> bool:
+        return self._is_set
+
+    async def wait(self) -> None:
+        self.wait_count += 1
+        if self.wait_count >= 2:
+            self._is_set = True
 
 
 def make_outbox_event() -> OutboxEvent:
@@ -218,6 +234,106 @@ async def test_worker_returns_zero_when_no_outbox_events(
     )
 
     assert processed == 0
+
+
+@pytest.mark.asyncio
+async def test_run_outbox_loop_uses_active_and_idle_intervals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    processed_batches = [1, 0]
+    batch_sizes: list[int] = []
+    timeouts: list[float] = []
+    stop_event = FakeStopEvent()
+
+    async def fake_process_outbox_once(
+        publisher: object,
+        batch_size: int,
+    ) -> int:
+        batch_sizes.append(batch_size)
+        return processed_batches.pop(0)
+
+    async def fake_wait_for(
+        awaitable: object,
+        timeout: float,
+    ) -> None:
+        timeouts.append(timeout)
+        await awaitable  # type: ignore[misc]
+
+    monkeypatch.setattr(
+        worker,
+        "process_outbox_once",
+        fake_process_outbox_once,
+    )
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+
+    await worker.run_outbox_loop(
+        object(),  # type: ignore[arg-type]
+        stop_event,  # type: ignore[arg-type]
+        batch_size=10,
+        active_poll_interval=0.5,
+        idle_poll_interval=2.0,
+    )
+
+    assert batch_sizes == [10, 10]
+    assert timeouts == [0.5, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_main_uses_settings_for_outbox_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakePublisher:
+        def __init__(self, dsn: str) -> None:
+            captured["dsn"] = dsn
+
+        async def __aenter__(self) -> "FakePublisher":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
+            return None
+
+    def fake_install_shutdown_handlers(stop_event: object) -> None:
+        captured["stop_event"] = stop_event
+
+    async def fake_run_outbox_loop(
+        publisher: object,
+        stop_event: object,
+        *,
+        batch_size: int,
+        active_poll_interval: float,
+        idle_poll_interval: float,
+    ) -> None:
+        captured["publisher"] = publisher
+        captured["loop_stop_event"] = stop_event
+        captured["batch_size"] = batch_size
+        captured["active_poll_interval"] = active_poll_interval
+        captured["idle_poll_interval"] = idle_poll_interval
+
+    monkeypatch.setattr(worker, "RabbitMQPublisher", FakePublisher)
+    monkeypatch.setattr(
+        worker,
+        "install_shutdown_handlers",
+        fake_install_shutdown_handlers,
+    )
+    monkeypatch.setattr(worker, "run_outbox_loop", fake_run_outbox_loop)
+    monkeypatch.setattr(settings, "outbox_batch_size", 17)
+    monkeypatch.setattr(settings, "outbox_active_poll_interval", 0.25)
+    monkeypatch.setattr(settings, "outbox_idle_poll_interval", 3.5)
+
+    await worker.main()
+
+    assert captured["dsn"] == str(settings.rabbitmq_dsn)
+    assert captured["loop_stop_event"] is captured["stop_event"]
+    assert captured["batch_size"] == 17
+    assert captured["active_poll_interval"] == 0.25
+    assert captured["idle_poll_interval"] == 3.5
 
 
 @pytest.mark.asyncio

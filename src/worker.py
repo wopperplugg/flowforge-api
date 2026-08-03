@@ -1,4 +1,5 @@
 import asyncio
+import signal
 
 import structlog
 
@@ -15,9 +16,15 @@ logger = structlog.get_logger(__name__)
 
 
 def build_outbox_message(event: OutboxEvent) -> OutboxMessage:
+    correlation_id = event.correlation_id or event.id
+
     return OutboxMessage(
         event_id=event.id,
         event_type=event.event_type,
+        event_version=event.event_version or 1,
+        correlation_id=correlation_id,
+        causation_id=event.causation_id,
+        organization_id=event.organization_id,
         aggregate_type=event.aggregate_type,
         aggregate_id=event.aggregate_id,
         occurred_at=event.created_at,
@@ -26,7 +33,8 @@ def build_outbox_message(event: OutboxEvent) -> OutboxMessage:
 
 
 async def process_outbox_once(
-    publisher: RabbitMQPublisher, batch_size: int = 25
+    publisher: RabbitMQPublisher,
+    batch_size: int = 25,
 ) -> int:
     async with async_session_maker() as session:
         repository = OutboxRepository(session)
@@ -39,7 +47,6 @@ async def process_outbox_once(
         for event in events:
             try:
                 message = build_outbox_message(event)
-
                 await publisher.publish(message)
 
                 async with session.begin():
@@ -50,6 +57,7 @@ async def process_outbox_once(
                     "outbox_publish_failed",
                     event_id=str(event.id),
                     event_type=event.event_type,
+                    correlation_id=str(event.correlation_id),
                     error=str(exc),
                 )
 
@@ -66,20 +74,70 @@ async def process_outbox_once(
                     "outbox_event_published",
                     event_id=str(event.id),
                     event_type=event.event_type,
+                    correlation_id=str(event.correlation_id),
                 )
 
         return processed
 
 
+def install_shutdown_handlers(stop_event: asyncio.Event) -> None:
+    loop = asyncio.get_running_loop()
+
+    def request_shutdown() -> None:
+        logger.info("outbox_publisher_shutdown_requested")
+        stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, request_shutdown)
+
+
+async def run_outbox_loop(
+    publisher: RabbitMQPublisher,
+    stop_event: asyncio.Event,
+    *,
+    batch_size: int,
+    active_poll_interval: float,
+    idle_poll_interval: float,
+) -> None:
+    while not stop_event.is_set():
+        try:
+            processed = await process_outbox_once(
+                publisher,
+                batch_size=batch_size,
+            )
+        except Exception:
+            logger.exception("outbox_batch_failed")
+            processed = 0
+
+        timeout = active_poll_interval if processed else idle_poll_interval
+
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=timeout,
+            )
+        except TimeoutError:
+            pass
+
+
 async def main() -> None:
+    stop_event = asyncio.Event()
+    install_shutdown_handlers(stop_event)
+
     logger.info("outbox_publisher_started")
 
     async with RabbitMQPublisher(
         str(settings.rabbitmq_dsn),
     ) as publisher:
-        while True:
-            processed = await process_outbox_once(publisher)
-            await asyncio.sleep(1 if processed else 5)
+        await run_outbox_loop(
+            publisher,
+            stop_event,
+            batch_size=settings.outbox_batch_size,
+            active_poll_interval=settings.outbox_active_poll_interval,
+            idle_poll_interval=settings.outbox_idle_poll_interval,
+        )
+
+    logger.info("outbox_publisher_stopped")
 
 
 if __name__ == "__main__":

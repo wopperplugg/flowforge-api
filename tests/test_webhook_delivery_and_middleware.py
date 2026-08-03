@@ -222,6 +222,37 @@ async def test_deliver_webhooks_records_http_failure_without_raising(
 
 
 @pytest.mark.asyncio
+async def test_deliver_webhooks_sends_correlation_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeDeliverySession()
+    organization_id = uuid.uuid4()
+    correlation_id = uuid.uuid4()
+    FakeAsyncClient.calls = []
+    FakeAsyncClient.response = FakeResponse()
+
+    async def fake_resolve(session: object, task_id: uuid.UUID) -> uuid.UUID:
+        return organization_id
+
+    monkeypatch.setattr(delivery, "resolve_task_organization_id", fake_resolve)
+    monkeypatch.setattr(delivery, "WebhookRepository", FakeWebhookRepository)
+    monkeypatch.setattr(delivery, "is_safe_webhook_url", lambda url: True)
+    monkeypatch.setattr(delivery, "decrypt_webhook_secret", lambda encrypted: "secret")
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    await delivery.deliver_webhooks_for_outbox_event(
+        session,  # type: ignore[arg-type]
+        event_id=uuid.uuid4(),
+        event_type="task.created",
+        payload={"task_id": str(uuid.uuid4())},
+        correlation_id=correlation_id,
+    )
+
+    _, _, headers = FakeAsyncClient.calls[-1]
+    assert headers["X-FlowForge-Correlation-ID"] == str(correlation_id)
+
+
+@pytest.mark.asyncio
 async def test_deliver_webhooks_skips_when_no_subscriptions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import signal
-from typing import cast
+from collections.abc import Awaitable, Callable
+from typing import Protocol, cast
 
 import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
@@ -25,12 +26,24 @@ logger = logging.getLogger(__name__)
 CONSUMER_NAME = "webhook-worker"
 
 
+class ConsumerQueue(Protocol):
+    async def consume(
+        self,
+        callback: Callable[[AbstractIncomingMessage], Awaitable[None]],
+    ) -> object: ...
+
+
 async def handle_retry(
     message: AbstractIncomingMessage,
     *,
     event_id: str,
+    correlation_id: str | None,
 ) -> None:
-    published = await publish_retry(cast(RetryChannel, message.channel), message)
+    published = await publish_retry(
+        cast(RetryChannel, message.channel),
+        message,
+        correlation_id=correlation_id,
+    )
 
     if published:
         await message.ack()
@@ -61,6 +74,7 @@ async def process_message(message: AbstractIncomingMessage) -> None:
         extra={
             "event_id": str(event.event_id),
             "event_type": event.event_type,
+            "correlation_id": str(event.correlation_id),
         },
     )
 
@@ -81,6 +95,7 @@ async def process_message(message: AbstractIncomingMessage) -> None:
                         event_id=event.event_id,
                         event_type=event.event_type,
                         payload=event.payload,
+                        correlation_id=event.correlation_id,
                     )
 
     except NonRetryableWebhookError:
@@ -99,6 +114,9 @@ async def process_message(message: AbstractIncomingMessage) -> None:
         await handle_retry(
             message,
             event_id=str(event.event_id),
+            correlation_id=(
+                str(event.correlation_id) if event.correlation_id is not None else None
+            ),
         )
         return
 
@@ -124,8 +142,29 @@ async def process_message(message: AbstractIncomingMessage) -> None:
 
     logger.info(
         "Webhook event processed",
-        extra={"event_id": str(event.event_id)},
+        extra={
+            "event_id": str(event.event_id),
+            "correlation_id": str(event.correlation_id),
+        },
     )
+
+
+def install_shutdown_handlers(stop_event: asyncio.Event) -> None:
+    def ask_exit(sig_name: str) -> None:
+        logger.warning(f"Received signal {sig_name}. Initiating graceful shutdown")
+        stop_event.set()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, ask_exit, sig.name)
+
+
+async def consume_until_stopped(
+    queue: ConsumerQueue,
+    stop_event: asyncio.Event,
+) -> None:
+    await queue.consume(process_message)
+    await stop_event.wait()
 
 
 async def run_worker() -> None:
@@ -142,20 +181,12 @@ async def run_worker() -> None:
     )
 
     stop_event = asyncio.Event()
-
-    def ask_exit(sig_name: str) -> None:
-        logger.warning(f"Received signal {sig_name}. Initiating graceful shutdown")
-        stop_event.set()
-
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, ask_exit, sig.name)
+    install_shutdown_handlers(stop_event)
 
     logger.info("Webhook worker started")
 
     try:
-        await queue.consume(process_message)
-        await stop_event.wait()
+        await consume_until_stopped(queue, stop_event)
         logger.info("Stop event received.")
     finally:
         logger.info("Closing channel and connection gracefully...")
