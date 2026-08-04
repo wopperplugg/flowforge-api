@@ -1,15 +1,25 @@
+x-app-environment: &app-environment
+  APP_ENV: production
+  APP_DEBUG: "false"
+  POSTGRES_HOST: postgres
+  REDIS_HOST: redis
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: 5672
+
+x-app-service: &app-service
+  image: ${FLOWFORGE_IMAGE:-ghcr.io/wopperplugg/flowforge-api:main}
+  env_file:
+    - path: .env.production
+      required: false
+  environment:
+    <<: *app-environment
+  restart: unless-stopped
+
+
 services:
   api:
-    image: ${FLOWFORGE_IMAGE:-ghcr.io/wopperplugg/flowforge-api:main}
+    <<: *app-service
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000
-    env_file:
-      - path: .env.production
-        required: false
-    environment:
-      APP_ENV: production
-      APP_DEBUG: "false"
-      POSTGRES_HOST: postgres
-      REDIS_HOST: redis
     ports:
       - "8000:8000"
     depends_on:
@@ -26,16 +36,18 @@ services:
     restart: unless-stopped
 
   worker:
-    image: ${FLOWFORGE_IMAGE:-ghcr.io/wopperplugg/flowforge-api:main}
+    <<: *app-service
     command: python -m src.worker
-    env_file:
-      - path: .env.production
-        required: false
-    environment:
-      APP_ENV: production
-      APP_DEBUG: "false"
-      POSTGRES_HOST: postgres
-      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+  
+  webhook-worker:
+    <<: *app-service
+    command: python -m src.webhook_worker
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,17 +56,10 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: ${FLOWFORGE_IMAGE:-ghcr.io/wopperplugg/flowforge-api:main}
+    <<: *app-service
     command: alembic upgrade head
     profiles: ["migration"]
-    env_file:
-      - path: .env.production
-        required: false
-    environment:
-      APP_ENV: production
-      APP_DEBUG: "false"
-      POSTGRES_HOST: postgres
-      REDIS_HOST: redis
+    restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,6 +91,22 @@ services:
       retries: 10
     restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?RABBITMQ_USER обязателен}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD обязателен}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:?RABBITMQ_VHOST обязателен}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
+  rabbitmq_data:
