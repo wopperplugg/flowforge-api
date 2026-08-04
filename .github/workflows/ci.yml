@@ -35,6 +35,11 @@ jobs:
       REDIS_HOST: localhost
       REDIS_PORT: "6379"
       REDIS_DB: "0"
+      RABBITMQ_HOST: localhost
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: flowforge
+      RABBITMQ_PASSWORD: flowforge
+      RABBITMQ_VHOST: /
       RUN_INTEGRATION_TESTS: "1"
     services:
       postgres:
@@ -57,6 +62,18 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      rabbitmq:
+        image: rabbitmq:4-management
+        env:
+          RABBITMQ_DEFAULT_USER: flowforge
+          RABBITMQ_DEFAULT_PASS: flowforge
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
           --health-timeout 3s
           --health-retries 10
 
