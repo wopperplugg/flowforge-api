@@ -5,84 +5,111 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.137%2B-009688)
 ![Docker](https://img.shields.io/badge/docker-GHCR-2496ED)
 
-FlowForge API - backend на FastAPI, подготовленный к production, для совместной
-работы с задачами. Проект показывает регистрацию и авторизацию, организации,
-проекты, задачи, optimistic locking, доставку webhook через outbox, миграции
-PostgreSQL, rate limiting на Redis, структурированные логи и Docker-ready
-runtime.
+FlowForge API - демонстрационный backend-проект для портфолио. Его цель -
+показать навыки backend-разработчика на Python: проектирование REST API,
+работу с PostgreSQL, асинхронный SQLAlchemy, JWT-аутентификацию, доменную
+архитектуру, фоновые worker-процессы, надежную доставку webhook, Docker,
+миграции, тесты и CI/CD.
+
+Проект сделан как API для командной работы с задачами. В нем есть пользователи,
+организации, проекты, задачи, комментарии, история статусов, роли участников и
+подписки на webhook-события.
+
+## Текущее состояние
+
+Проект находится в состоянии portfolio-ready demo: основные backend-сценарии
+реализованы, покрыты тестами и запускаются локально через Docker Compose.
+Код не является коммерческим продуктом, но демонстрирует production-подходы,
+которые обычно нужны в реальном backend-сервисе.
+
+Реализовано:
+
+- регистрация, login, refresh и logout через JWT access/refresh tokens;
+- ротация refresh-токенов и отзыв сессий;
+- пользователи, организации, роли участников и проекты;
+- задачи с комментариями, историей статусов и optimistic locking;
+- единый формат доменных ошибок;
+- PostgreSQL, Alembic migrations и async SQLAlchemy 2.x;
+- Redis rate limiting;
+- RabbitMQ messaging и outbox pattern для side effects;
+- отдельные worker-процессы для outbox и webhook delivery;
+- подпись webhook-запросов и хранение секретов;
+- health endpoints для live/ready checks;
+- структурированные JSON-логи через `structlog`;
+- Dockerfile, `docker-compose.yml` и `docker-compose.prod.yml`;
+- CI/CD pipeline с linting, formatting, typing, tests, coverage, security scan,
+  dependency audit и сборкой Docker image.
+
+Осознанные точки роста:
+
+- усилить защиту refresh-token rotation от конкурентных refresh-запросов;
+- усилить SSRF-защиту при фактической доставке webhook;
+- добавить pagination для list endpoints;
+- вынести повторяющуюся authorization logic в отдельный policy layer;
+- расширить integration tests для полного auth flow.
+
+Подробный разбор сильных сторон и дальнейших улучшений лежит в
+[docs/portfolio-review.md](docs/portfolio-review.md).
+
+## Что проект показывает
+
+- Умение строить backend по доменам, а не складывать всю логику в роутеры.
+- Разделение ответственности: routers, services, repositories, schemas,
+  models и infrastructure.
+- Работу с транзакциями, миграциями, async ORM и PostgreSQL.
+- Проектирование API-контракта и стабильного error envelope.
+- Практики надежности: optimistic locking, outbox, worker delivery, retries.
+- Базовые практики безопасности: password hashing, JWT validation, token
+  rotation, webhook signatures, secret checks для production.
+- Инженерную дисциплину: типизация, тесты, линтеры, security checks и Docker.
 
 ## Стек
 
-- Python 3.13, FastAPI, Pydantic v2
-- SQLAlchemy 2.x async ORM, Alembic, PostgreSQL
-- Redis для rate limiting и runtime-инфраструктуры
-- JWT access/refresh tokens с ротацией refresh-токенов
-- Outbox worker для надежной доставки webhook
-- Pytest, Ruff, Mypy, Bandit и pip-audit для проверки качества
+- Python 3.13
+- FastAPI, Pydantic v2
+- SQLAlchemy 2.x async ORM, Alembic
+- PostgreSQL
+- Redis
+- RabbitMQ
+- JWT, Argon2 password hashing
+- Pytest, Ruff, Mypy, Bandit, pip-audit
+- Docker, Docker Compose, GitHub Actions
 
 ## Архитектура
 
 Код разделен по бизнес-доменам:
 
-- `src/auth` - login, token refresh, logout, отзыв сессий
-- `src/users` - регистрация пользователей и хеширование паролей
-- `src/organizations` - организации и роли участников
-- `src/projects` - проекты внутри организаций
-- `src/tasks` - CRUD задач, комментарии, история статусов, optimistic locking
-- `src/webhooks` - подписки, секреты, подпись и доставка webhook
-- `src/outbox` - надежная очередь событий для side effects
-- `src/infrastructure` - логирование, health checks, Redis, middleware
+- `src/auth` - authentication, refresh-token rotation, logout, отзыв сессий;
+- `src/users` - пользователи и хеширование паролей;
+- `src/organizations` - организации, участники и роли;
+- `src/projects` - проекты внутри организаций;
+- `src/tasks` - задачи, комментарии, история статусов, optimistic locking;
+- `src/webhooks` - подписки, секреты, подпись и доставка webhook;
+- `src/outbox` - очередь событий для надежных side effects;
+- `src/messaging` - RabbitMQ contracts, topology, publisher и retry logic;
+- `src/infrastructure` - middleware, Redis, rate limiting, health checks, logs.
 
-Роутеры остаются тонкими: они принимают HTTP-запросы и вызывают сервисы.
-Сервисы содержат бизнес-правила, репозитории отвечают за SQLAlchemy-запросы,
-а схемы Pydantic задают HTTP-контракт.
+Основной принцип: HTTP-слой остается тонким. Роутеры принимают запросы и
+вызывают сервисы, сервисы содержат бизнес-правила, репозитории отвечают за
+SQLAlchemy-запросы, а Pydantic-схемы фиксируют API-контракт.
 
 ## Локальный запуск
 
 ```bash
 cp .env.example .env
 uv sync
-docker compose up -d postgres redis
+docker compose up -d postgres redis rabbitmq
 uv run alembic upgrade head
 uv run uvicorn src.main:app --reload
 ```
 
-## Демо-данные
-
-После запуска PostgreSQL и миграций можно заполнить все таблицы реалистичными
-данными для ручной проверки приложения:
-
-```bash
-uv run python -m scripts.seed_demo_data
-```
-
-В Docker Compose тот же seed запускается внутри API-контейнера:
-
-```bash
-docker compose exec -T api python -m scripts.seed_demo_data
-```
-
-Скрипт идемпотентный: повторные запуски не создают дубликаты. Он также выдает
-доступ к demo-организации всем уже существующим активным пользователям, чтобы
-их текущие токены не получали пустые списки. Демо-пользователи:
-
-- `admin@flowforge-demo.com`
-- `alice.petrov@flowforge-demo.com`
-- `boris.ivanov@flowforge-demo.com`
-- `clara.smith@flowforge-demo.com`
-- `dmitry.qa@flowforge-demo.com`
-
-Пароль для всех активных demo-аккаунтов: `DemoPass123!`.
-
-OpenAPI-документация доступна по адресу:
+OpenAPI-документация будет доступна по адресу:
 
 ```text
 http://localhost:8000/docs
 ```
 
-## Docker
-
-Запуск API, worker, PostgreSQL и Redis:
+Полный запуск API, worker, PostgreSQL, Redis и RabbitMQ:
 
 ```bash
 docker compose up --build
@@ -90,8 +117,53 @@ docker compose up --build
 
 Health endpoints:
 
-- `GET /health/live` - проверка, что процесс API запущен
-- `GET /health/ready` - проверка готовности PostgreSQL и Redis
+- `GET /health/live` - процесс API запущен;
+- `GET /health/ready` - PostgreSQL и Redis доступны.
+
+## Демо-данные
+
+После запуска PostgreSQL и миграций можно заполнить базу демонстрационными
+данными:
+
+```bash
+uv run python -m scripts.seed_demo_data
+```
+
+В Docker Compose:
+
+```bash
+docker compose exec -T api python -m scripts.seed_demo_data
+```
+
+Скрипт идемпотентный и не создает дубликаты при повторном запуске.
+
+Демо-пользователи:
+
+- `admin@flowforge-demo.com`
+- `alice.petrov@flowforge-demo.com`
+- `boris.ivanov@flowforge-demo.com`
+- `clara.smith@flowforge-demo.com`
+- `dmitry.qa@flowforge-demo.com`
+
+Пароль для всех demo-аккаунтов:
+
+```text
+DemoPass123!
+```
+
+## Основной API Flow
+
+1. `POST /api/v1/auth/register` - регистрация пользователя.
+2. `POST /api/v1/auth/login` - вход и получение токенов.
+3. `POST /api/v1/organizations` - создание организации.
+4. `POST /api/v1/organizations/{organization_id}/projects` - создание проекта.
+5. `POST /api/v1/projects/{project_id}/tasks` - создание задачи.
+6. `PATCH /api/v1/tasks/{task_id}` - обновление задачи.
+7. `POST /api/v1/organizations/{organization_id}/webhooks` - подписка на
+   события задач.
+
+Обновление задачи требует актуальное поле `version`. Если задача была изменена
+другим клиентом раньше, API возвращает `409 task_version_conflict`.
 
 ## Проверки
 
@@ -103,59 +175,44 @@ uv run pytest --cov=src --cov-fail-under=60
 uv run pre-commit run --all-files
 ```
 
-Текущие тесты покрывают публичный API-контракт, health endpoint, нормализацию
-схем, стабильность enum-значений, безопасность webhook URL и основные
-бизнес-сценарии сервисов.
+Тесты покрывают API-контракт, health endpoints, схемы, enum-значения, webhook
+security, messaging, workers и ключевые бизнес-сценарии сервисов.
 
 ## CI/CD
 
-GitHub Actions запускает quality gate на каждый pull request и push в `main`:
+GitHub Actions запускает quality gate на pull request и push в `main`:
 
-- Ruff linting и проверка форматирования
-- Проверка типов через Mypy
-- Pytest с coverage
-- Coverage gate с минимальным порогом
-- Pre-commit hooks
-- Security scan через Bandit
-- Аудит Python-зависимостей через pip-audit
-- Сборка Docker image
+- Ruff linting и проверка форматирования;
+- Mypy type checking;
+- Pytest с coverage;
+- Pre-commit hooks;
+- Bandit security scan;
+- pip-audit dependency audit;
+- Docker image build.
 
-При push в `main` и при version tags, например `v1.0.0`, pipeline публикует
-Docker image в GitHub Container Registry:
+При push в `main` и version tags, например `v1.0.0`, pipeline публикует Docker
+image в GitHub Container Registry:
 
 ```text
 ghcr.io/<owner>/<repo>
 ```
 
-Images тегируются по branch, git tag и commit SHA. Production deployment должен
-забрать опубликованный image, выполнить `alembic upgrade head`, затем запустить
-API и worker containers с production environment variables.
-
-## API Flow
-
-1. Регистрация через `POST /api/v1/auth/register`.
-2. Login через `POST /api/v1/auth/login`.
-3. Создание организации через `POST /api/v1/organizations`.
-4. Создание проекта через
-   `POST /api/v1/organizations/{organization_id}/projects`.
-5. Создание и обновление задач через `/api/v1/projects/{project_id}/tasks` и
-   `/api/v1/tasks/{task_id}`.
-6. Подписка на события задач через
-   `POST /api/v1/organizations/{organization_id}/webhooks`.
-
-Обновление задачи требует актуальное поле `version`. Если другой клиент успел
-изменить задачу раньше, API вернет `409 task_version_conflict`.
-
 ## Production Notes
 
-- В production нужно задать сильные `APP_SECRET_KEY`, `POSTGRES_PASSWORD` и
-  `WEBHOOK_SECRET_ENCRYPTION_KEY`.
-- Alembic-миграции запускаются явно перед выкладкой нового кода.
-- В production webhook targets должны использовать HTTPS.
-- Worker обрабатывает outbox events отдельно от request handling, поэтому
-  ошибки доставки webhook не откатывают пользовательские изменения задач.
+Для production-like запуска нужно задать сильные значения:
 
-Подробнее:
+- `APP_SECRET_KEY`;
+- `POSTGRES_PASSWORD`;
+- `WEBHOOK_SECRET_ENCRYPTION_KEY`;
+- RabbitMQ credentials;
+- Redis/PostgreSQL connection settings.
+
+Alembic-миграции запускаются отдельным шагом перед стартом нового API и worker
+containers. Webhook delivery вынесен из request path в worker, поэтому ошибки
+внешних webhook endpoint не откатывают пользовательские изменения задач.
+
+## Документация
 
 - [Архитектура](docs/ARCHITECTURE.md)
 - [Деплой](docs/DEPLOYMENT.md)
+- [Portfolio Review](docs/portfolio-review.md)
