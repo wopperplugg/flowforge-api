@@ -276,7 +276,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(flowforge_outbox_events_published_total[5m]))",
+          "expr": "sum(rate(flowforge_outbox_events_published_total[5m])) or vector(0)",
           "legendFormat": "published",
           "refId": "A"
         }
@@ -330,7 +330,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (result) (rate(flowforge_webhook_messages_processed_total[5m]))",
+          "expr": "sum(rate(flowforge_webhook_messages_processed_total[5m])) or vector(0)",
           "legendFormat": "{{result}}",
           "refId": "A"
         }
