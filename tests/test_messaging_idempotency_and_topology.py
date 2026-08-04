@@ -13,8 +13,11 @@ class FakeScalarSession:
         self.scalar_result = scalar_result
         self.statement: object | None = None
 
-    async def scalar(self, statement: object) -> object:
+    async def execute(self, statement: object) -> "FakeScalarSession":
         self.statement = statement
+        return self
+
+    def scalar_one_or_none(self) -> object:
         return self.scalar_result
 
 

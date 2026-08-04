@@ -71,7 +71,9 @@ def create_session_maker_mock() -> tuple[
 
     session = MagicMock()
     session.begin.return_value = transaction_context
-    session.scalar = AsyncMock(return_value=uuid4())
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = uuid4()
+    session.execute = AsyncMock(return_value=execute_result)
     session.add = MagicMock()
 
     session_context = MagicMock()
@@ -131,7 +133,7 @@ async def test_process_message_delivers_and_acknowledges_valid_event(
         await process_message(message)
 
     delivery_mock.assert_awaited_once()
-    session.scalar.assert_awaited_once()
+    session.execute.assert_awaited_once()
 
     delivery_call = delivery_mock.await_args
 
@@ -282,7 +284,7 @@ async def test_process_message_acknowledges_duplicate_without_delivery(
 ) -> None:
     message = create_message(valid_message_body)
     session_maker, session = create_session_maker_mock()
-    session.scalar.return_value = None
+    session.execute.return_value.scalar_one_or_none.return_value = None
 
     delivery_mock = AsyncMock()
 
@@ -299,7 +301,7 @@ async def test_process_message_acknowledges_duplicate_without_delivery(
         await process_message(message)
 
     delivery_mock.assert_not_awaited()
-    session.scalar.assert_awaited_once()
+    session.execute.assert_awaited_once()
     message.ack.assert_awaited_once_with()
     message.reject.assert_not_awaited()
 
@@ -310,7 +312,7 @@ async def test_process_message_retries_database_error_before_delivery(
 ) -> None:
     message = create_message(valid_message_body)
     session_maker, session = create_session_maker_mock()
-    session.scalar.side_effect = SQLAlchemyError("database unavailable")
+    session.execute.side_effect = SQLAlchemyError("database unavailable")
 
     delivery_mock = AsyncMock()
 

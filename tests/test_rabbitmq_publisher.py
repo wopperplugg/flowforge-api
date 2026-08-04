@@ -72,6 +72,7 @@ async def test_publish_sends_persistent_message(
     exchange.publish.assert_awaited_once()
     published_message = exchange.publish.call_args.args[0]
     assert published_message.message_id == str(outbox_message.event_id)
+    assert published_message.correlation_id == str(outbox_message.correlation_id)
     assert published_message.type == outbox_message.event_type
     assert published_message.timestamp == outbox_message.occurred_at
     assert published_message.delivery_mode == DeliveryMode.PERSISTENT

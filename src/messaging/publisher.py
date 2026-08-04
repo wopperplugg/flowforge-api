@@ -54,6 +54,9 @@ class RabbitMQPublisher:
             content_type="application/json",
             delivery_mode=DeliveryMode.PERSISTENT,
             message_id=str(event.event_id),
+            correlation_id=(
+                str(event.correlation_id) if event.correlation_id is not None else None
+            ),
             type=event.event_type,
             timestamp=event.occurred_at,
             headers=headers,

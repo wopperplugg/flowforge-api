@@ -27,5 +27,6 @@ async def try_mark_processed(
         .returning(ProcessedMessage.message_id)
     )
 
-    inserted_id = await session.scalar(statement)
+    result = await session.execute(statement)
+    inserted_id = result.scalar_one_or_none()
     return inserted_id is not None
