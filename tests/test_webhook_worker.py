@@ -491,9 +491,15 @@ async def test_run_worker_consumes_until_shutdown_and_closes_resources(
         "src.webhook_worker.consume_until_stopped",
         fake_consume_until_stopped,
     )
+    start_metrics_server = MagicMock()
+    monkeypatch.setattr(
+        "src.webhook_worker.start_http_server",
+        start_metrics_server,
+    )
 
     await run_worker()
 
+    start_metrics_server.assert_called_once()
     channel.set_qos.assert_awaited_once_with(prefetch_count=10)
     channel.get_queue.assert_awaited_once_with(
         WEBHOOK_QUEUE,

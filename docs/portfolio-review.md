@@ -23,6 +23,7 @@ limiting, PostgreSQL, Alembic migrations, webhook subscriptions и outbox worker
 - Optimistic locking при обновлении задач.
 - Outbox pattern с `FOR UPDATE SKIP LOCKED`.
 - Structured JSON logging через `structlog`.
+- Prometheus `/metrics` для HTTP, outbox и webhook worker метрик.
 - Проверка production secrets при `APP_ENV=production`.
 - Dockerfile, dev compose и production compose.
 - CI/CD pipeline с linting, formatting, typing, tests, coverage, security scan,
@@ -104,8 +105,7 @@ flowchart LR
 3. Добавить integration tests для auth API flow: register -> login -> refresh
    -> logout.
 4. Добавить OpenAPI contract artifact в CI.
-5. Добавить observability: `/metrics`, request duration, worker metrics.
-6. Усилить webhook SSRF defense и протестировать edge cases.
+5. Усилить webhook SSRF defense и протестировать edge cases.
 
 ## Итог
 

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import OutboxStatus
@@ -10,6 +10,22 @@ from src.outbox.models import OutboxEvent
 class OutboxRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def count_pending(self) -> int:
+        now = datetime.now(UTC)
+        statement = (
+            select(func.count())
+            .select_from(OutboxEvent)
+            .where(
+                OutboxEvent.status == OutboxStatus.PENDING,
+                or_(
+                    OutboxEvent.next_attempt_at.is_(None),
+                    OutboxEvent.next_attempt_at <= now,
+                ),
+            )
+        )
+        result = await self.session.scalar(statement)
+        return int(result or 0)
 
     async def claim_pending(self, limit: int) -> list[OutboxEvent]:
         now = datetime.now(UTC)

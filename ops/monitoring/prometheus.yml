@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: flowforge-api
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - api:8000
+
+  - job_name: flowforge-outbox-worker
+    static_configs:
+      - targets:
+          - worker:9101
+
+  - job_name: flowforge-webhook-worker
+    static_configs:
+      - targets:
+          - webhook-worker:9102

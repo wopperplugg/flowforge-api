@@ -35,6 +35,7 @@ FlowForge API - демонстрационный backend-проект для п�
 - отдельные worker-процессы для outbox и webhook delivery;
 - подпись webhook-запросов и хранение секретов;
 - health endpoints для live/ready checks;
+- Prometheus `/metrics` для HTTP, outbox и webhook worker метрик;
 - структурированные JSON-логи через `structlog`;
 - Dockerfile, `docker-compose.yml` и `docker-compose.prod.yml`;
 - CI/CD pipeline с linting, formatting, typing, tests, coverage, security scan,
@@ -119,6 +120,14 @@ Health endpoints:
 
 - `GET /health/live` - процесс API запущен;
 - `GET /health/ready` - PostgreSQL и Redis доступны.
+- `GET /metrics` - Prometheus metrics endpoint.
+
+Monitoring endpoints при запуске через Docker Compose:
+
+- `http://localhost:9090` - Prometheus;
+- `http://localhost:3000` - Grafana;
+- `http://localhost:9101/metrics` - outbox worker metrics;
+- `http://localhost:9102/metrics` - webhook worker metrics.
 
 ## Демо-данные
 

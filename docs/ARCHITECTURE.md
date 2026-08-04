@@ -10,6 +10,8 @@ FlowForge API - backend на FastAPI с разделением по бизнес
 - Worker process: читает outbox events и доставляет webhook.
 - PostgreSQL: основное реляционное хранилище.
 - Redis: rate limiting и runtime-инфраструктура.
+- Prometheus metrics: `/metrics`, HTTP request metrics, outbox и webhook
+  worker metrics.
 - Alembic: явные миграции схемы базы данных.
 
 ## Структура модулей
@@ -21,7 +23,8 @@ FlowForge API - backend на FastAPI с разделением по бизнес
 - `src/tasks`: CRUD задач, комментарии, история статусов, optimistic locking.
 - `src/webhooks`: подписки, секреты, подписи и доставка webhook.
 - `src/outbox`: надежная очередь событий для side effects.
-- `src/infrastructure`: логирование, Redis, health checks, middleware.
+- `src/infrastructure`: логирование, Redis, health checks, middleware,
+  Prometheus metrics.
 
 ## Надежность
 

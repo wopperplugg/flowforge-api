@@ -2,10 +2,16 @@ import asyncio
 import signal
 
 import structlog
+from prometheus_client import start_http_server
 
 from src.config import settings
 from src.database import async_session_maker
 from src.infrastructure.logging import configure_logging
+from src.infrastructure.metrics import (
+    OUTBOX_EVENTS_PUBLISHED_TOTAL,
+    OUTBOX_PENDING_EVENTS,
+    OUTBOX_PUBLISH_FAILURES_TOTAL,
+)
 from src.messaging.contracts import OutboxMessage
 from src.messaging.publisher import RabbitMQPublisher
 from src.outbox.models import OutboxEvent
@@ -40,7 +46,10 @@ async def process_outbox_once(
         repository = OutboxRepository(session)
 
         async with session.begin():
+            pending_events = await repository.count_pending()
             events = await repository.claim_pending(batch_size)
+
+        OUTBOX_PENDING_EVENTS.set(pending_events)
 
         processed = 0
 
@@ -60,6 +69,9 @@ async def process_outbox_once(
                     correlation_id=str(event.correlation_id),
                     error=str(exc),
                 )
+                OUTBOX_PUBLISH_FAILURES_TOTAL.labels(
+                    event_type=event.event_type,
+                ).inc()
 
                 async with session.begin():
                     await repository.mark_failed_or_retry(
@@ -69,6 +81,9 @@ async def process_outbox_once(
 
             else:
                 processed += 1
+                OUTBOX_EVENTS_PUBLISHED_TOTAL.labels(
+                    event_type=event.event_type,
+                ).inc()
 
                 logger.info(
                     "outbox_event_published",
@@ -124,6 +139,7 @@ async def main() -> None:
     stop_event = asyncio.Event()
     install_shutdown_handlers(stop_event)
 
+    start_http_server(settings.outbox_metrics_port)
     logger.info("outbox_publisher_started")
 
     async with RabbitMQPublisher(

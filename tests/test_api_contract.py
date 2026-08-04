@@ -22,5 +22,17 @@ def test_liveness_endpoint_returns_ok() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_metrics_endpoint_exposes_prometheus_text() -> None:
+    with TestClient(app) as client:
+        client.get("/health/live")
+        response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "flowforge_http_requests_total" in response.text
+    assert 'path="/health/live"' in response.text
+    assert "/metrics" not in app.openapi()["paths"]
+
+
 def test_task_status_review_value_is_stable() -> None:
     assert TaskStatus.REVIEW.value == "review"

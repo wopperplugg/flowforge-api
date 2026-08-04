@@ -7,6 +7,7 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
+      RABBITMQ_HOST: rabbitmq
     ports:
       - "8000:8000"
     volumes:
@@ -23,54 +24,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  rabbitmq:
-    image: rabbitmq:4-management
-    container_name: rabbitmq
-    ports: 
-      - 5672:5672
-      - 15672:15672
-    environment:
-      RABBITMQ_DEFAULT_USER: flowforge
-      RABBITMQ_DEFAULT_PASS: flowforge
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
- 
-  webhook-worker:
-    build: . 
-    command: python -m src.webhook_worker
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: flowforge
-      POSTGRES_USER: flowforge
-      POSTGRES_PASSWORD: flowforge
-
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_DB: "0"
-      
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USER: flowforge
-      RABBITMQ_PASSWORD: flowforge
-      RABBITMQ_VHOST: /
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - .:/app
-    restart: unless-stopped
-
   worker:
     build: .
     command: python -m src.worker
@@ -80,10 +33,32 @@ services:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
       RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USER: flowforge
-      RABBITMQ_PASSWORD: flowforge
-      RABBITMQ_VHOST: /
+      OUTBOX_METRICS_PORT: "9101"
+    ports:
+      - "9101:9101"
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  webhook-worker:
+    build: .
+    command: python -m src.webhook_worker
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      RABBITMQ_HOST: rabbitmq
+      WEBHOOK_METRICS_PORT: "9102"
+    ports:
+      - "9102:9102"
     volumes:
       - .:/app
     depends_on:
@@ -126,7 +101,56 @@ services:
       retries: 10
     restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:4-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: flowforge
+      RABBITMQ_DEFAULT_PASS: flowforge
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./ops/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_started
+      webhook-worker:
+        condition: service_started
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./ops/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
   rabbitmq_data:
+  prometheus_data:
+  grafana_data:

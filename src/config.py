@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     rate_limit_requests: int = Field(default=120, gt=0)
     rate_limit_window_seconds: int = Field(default=60, gt=0)
     webhook_timeout_seconds: float = Field(default=5.0, gt=0)
+    webhook_metrics_port: int = 9102
 
     outbox_batch_size: int = Field(default=25, alias="OUTBOX_BATCH_SIZE", gt=0)
     outbox_active_poll_interval: float = Field(
@@ -80,6 +81,7 @@ class Settings(BaseSettings):
         alias="OUTBOX_IDLE_POLL_INTERVAL",
         gt=0,
     )
+    outbox_metrics_port: int = 9101
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":

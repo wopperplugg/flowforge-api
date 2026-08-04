@@ -13,6 +13,8 @@ from src.config import settings
 from src.database import dispose_engine
 from src.infrastructure.health import router as health_router
 from src.infrastructure.logging import configure_logging
+from src.infrastructure.metrics import PrometheusMetricsMiddleware
+from src.infrastructure.metrics import router as metrics_router
 from src.infrastructure.middleware import RequestContextMiddleware
 from src.infrastructure.rate_limit import RateLimitMiddleware
 from src.infrastructure.redis import close_redis
@@ -46,6 +48,7 @@ app.add_middleware(
 )
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(RequestContextMiddleware)
+app.add_middleware(PrometheusMetricsMiddleware)
 
 
 @app.exception_handler(AppError)
@@ -86,3 +89,4 @@ app.include_router(projects_router)
 app.include_router(tasks_router)
 app.include_router(webhooks_router)
 app.include_router(health_router)
+app.include_router(metrics_router)

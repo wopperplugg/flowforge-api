@@ -161,6 +161,9 @@ async def test_worker_processes_successful_and_failed_events(
         ) -> list[OutboxEvent]:
             return events
 
+        async def count_pending(self) -> int:
+            return len(events)
+
         async def mark_processed(
             self,
             event: OutboxEvent,
@@ -220,6 +223,9 @@ async def test_worker_returns_zero_when_no_outbox_events(
         async def claim_pending(self, batch_size: int) -> list[OutboxEvent]:
             assert batch_size == 50
             return []
+
+        async def count_pending(self) -> int:
+            return 0
 
     class FakePublisher:
         async def publish(self, message: OutboxMessage) -> None:
@@ -316,7 +322,11 @@ async def test_main_uses_settings_for_outbox_loop(
         captured["active_poll_interval"] = active_poll_interval
         captured["idle_poll_interval"] = idle_poll_interval
 
+    def fake_start_http_server(port: int) -> None:
+        captured["metrics_port"] = port
+
     monkeypatch.setattr(worker, "RabbitMQPublisher", FakePublisher)
+    monkeypatch.setattr(worker, "start_http_server", fake_start_http_server)
     monkeypatch.setattr(
         worker,
         "install_shutdown_handlers",
@@ -334,6 +344,7 @@ async def test_main_uses_settings_for_outbox_loop(
     assert captured["batch_size"] == 17
     assert captured["active_poll_interval"] == 0.25
     assert captured["idle_poll_interval"] == 3.5
+    assert captured["metrics_port"] == settings.outbox_metrics_port
 
 
 @pytest.mark.asyncio
