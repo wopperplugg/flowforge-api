@@ -129,6 +129,16 @@ Monitoring endpoints при запуске через Docker Compose:
 - `http://localhost:9101/metrics` - outbox worker metrics;
 - `http://localhost:9102/metrics` - webhook worker metrics.
 
+Prometheus также загружает alert rules из
+`ops/monitoring/alerts/flowforge-alerts.yml`:
+
+- API target down;
+- worker target down;
+- HTTP 5xx rate больше нуля;
+- outbox publish failures;
+- webhook retries spike;
+- растущий outbox pending backlog.
+
 ## Демо-данные
 
 После запуска PostgreSQL и миграций можно заполнить базу демонстрационными

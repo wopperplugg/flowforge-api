@@ -1,0 +1,68 @@
+groups:
+  - name: flowforge-targets
+    rules:
+      - alert: FlowForgeApiTargetDown
+        expr: up{job="flowforge-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: FlowForge API target is down
+          description: Prometheus cannot scrape the FlowForge API metrics endpoint.
+
+      - alert: FlowForgeWorkerTargetDown
+        expr: up{job=~"flowforge-(outbox|webhook)-worker"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: worker
+        annotations:
+          summary: FlowForge worker target is down
+          description: Prometheus cannot scrape {{ $labels.job }} at {{ $labels.instance }}.
+
+  - name: flowforge-api
+    rules:
+      - alert: FlowForgeHttp5xxRate
+        expr: sum(rate(flowforge_http_requests_total{status_code=~"5.."}[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: FlowForge API is returning 5xx responses
+          description: API 5xx responses were observed during the last 5 minutes.
+
+  - name: flowforge-outbox
+    rules:
+      - alert: FlowForgeOutboxPublishFailures
+        expr: sum(increase(flowforge_outbox_publish_failures_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: outbox-worker
+        annotations:
+          summary: FlowForge outbox publish failures detected
+          description: Outbox worker failed to publish at least one event during the last 5 minutes.
+
+      - alert: FlowForgeOutboxBacklogGrowing
+        expr: flowforge_outbox_pending_events > 0 and deriv(flowforge_outbox_pending_events[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: outbox-worker
+        annotations:
+          summary: FlowForge outbox backlog is growing
+          description: Pending outbox events are increasing for {{ $labels.instance }}.
+
+  - name: flowforge-webhooks
+    rules:
+      - alert: FlowForgeWebhookRetriesSpike
+        expr: sum(increase(flowforge_webhook_retries_total[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+          service: webhook-worker
+        annotations:
+          summary: FlowForge webhook retry spike detected
+          description: More than 5 webhook retries were scheduled during the last 5 minutes.
