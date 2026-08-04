@@ -125,6 +125,7 @@ Health endpoints:
 Monitoring endpoints при запуске через Docker Compose:
 
 - `http://localhost:9090` - Prometheus;
+- `http://localhost:9093` - Alertmanager;
 - `http://localhost:3000` - Grafana;
 - `http://localhost:9101/metrics` - outbox worker metrics;
 - `http://localhost:9102/metrics` - webhook worker metrics.
@@ -138,6 +139,14 @@ Prometheus также загружает alert rules из
 - outbox publish failures;
 - webhook retries spike;
 - растущий outbox pending backlog.
+
+Prometheus отправляет firing/resolved alerts в Alertmanager. Локальный
+Alertmanager настроен файлом
+`ops/monitoring/alertmanager/alertmanager.yml` и по умолчанию отправляет
+webhook-уведомления на `http://host.docker.internal:5001/alerts`. Для быстрой
+проверки можно запустить любой локальный webhook receiver на порту `5001`, а
+для реального окружения заменить receiver на Slack, email, Telegram gateway или
+другой incident-management endpoint.
 
 ## Демо-данные
 
