@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, status
 
 from src.auth.dependencies import get_current_user
 from src.common.dependencies import DbSession
+from src.common.pagination import Page, PaginationParams
 from src.tasks.schemas import (
     TaskCommentCreate,
     TaskCommentResponse,
@@ -38,14 +39,17 @@ async def create_task(
     return TaskResponse.model_validate(task)
 
 
-@router.get("/api/v1/projects/{project_id}/tasks", response_model=list[TaskResponse])
+@router.get(
+    "/api/v1/projects/{project_id}/tasks",
+    response_model=Page[TaskResponse],
+)
 async def list_tasks(
     project_id: uuid.UUID,
+    pagination: Annotated[PaginationParams, Depends()],
     current_user: Annotated[User, Depends(get_current_user)],
     task_service: Annotated[TaskService, Depends(get_task_service)],
-) -> list[TaskResponse]:
-    tasks = await task_service.list_tasks(project_id, current_user)
-    return [TaskResponse.model_validate(task) for task in tasks]
+) -> Page[TaskResponse]:
+    return await task_service.list_tasks(project_id, current_user, pagination)
 
 
 @router.get("/api/v1/tasks/{task_id}", response_model=TaskResponse)

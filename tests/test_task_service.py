@@ -1,8 +1,10 @@
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
 from src.common.enums import OutboxStatus, TaskPriority, TaskStatus
+from src.common.pagination import PaginationParams
 from src.outbox.models import OutboxEvent
 from src.projects.exceptions import ProjectNotFoundError
 from src.projects.models import Project
@@ -35,6 +37,7 @@ class FakeTaskRepository:
         self.created_tasks: list[Task] = []
         self.history: list[TaskStatusHistory] = []
         self.optimistic_updates: list[tuple[uuid.UUID, int, dict[str, object]]] = []
+        self.list_calls: list[tuple[uuid.UUID, uuid.UUID, int, int]] = []
 
     async def add_task(self, task: Task) -> Task:
         task.id = uuid.uuid4()
@@ -69,6 +72,19 @@ class FakeTaskRepository:
             setattr(self.task, key, value)
         self.task.version += 1
         return True
+
+    async def list_for_project(
+        self,
+        project_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[Task], int]:
+        self.list_calls.append((project_id, user_id, limit, offset))
+        if self.task is None or self.task.project_id != project_id:
+            return [], 0
+        return [self.task], 1
 
 
 def make_user() -> User:
@@ -145,6 +161,77 @@ async def test_create_task_denies_inaccessible_project_without_side_effects() ->
     assert task_repository.created_tasks == []
     assert task_repository.history == []
     assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_returns_paginated_response() -> None:
+    user = make_user()
+    project = make_project()
+    created_at = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    updated_at = datetime(2026, 1, 2, 3, 5, 6, tzinfo=UTC)
+    task = Task(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        created_by_id=user.id,
+        title="Review API",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.MEDIUM,
+        position=0,
+        version=1,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+    service, _, task_repository = make_service(project=project, task=task)
+
+    page = await service.list_tasks(
+        project.id,
+        user,
+        PaginationParams(limit=20, offset=0),
+    )
+
+    assert page.model_dump(mode="json") == {
+        "items": [
+            {
+                "id": str(task.id),
+                "project_id": str(project.id),
+                "created_by_id": str(user.id),
+                "assigned_to_id": None,
+                "title": "Review API",
+                "description": None,
+                "status": "todo",
+                "priority": "medium",
+                "position": 0,
+                "due_date": None,
+                "version": 1,
+                "created_at": "2026-01-02T03:04:05Z",
+                "updated_at": "2026-01-02T03:05:06Z",
+            }
+        ],
+        "total": 1,
+        "limit": 20,
+        "offset": 0,
+    }
+    assert task_repository.list_calls == [(project.id, user.id, 20, 0)]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_returns_empty_paginated_response() -> None:
+    user = make_user()
+    project = make_project()
+    service, _, _ = make_service(project=project)
+
+    page = await service.list_tasks(
+        project.id,
+        user,
+        PaginationParams(),
+    )
+
+    assert page.model_dump(mode="json") == {
+        "items": [],
+        "total": 0,
+        "limit": 20,
+        "offset": 0,
+    }
 
 
 @pytest.mark.asyncio

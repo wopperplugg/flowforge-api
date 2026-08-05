@@ -1,7 +1,7 @@
 import uuid
 from typing import cast
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.organizations.models import OrganizationMember
@@ -28,19 +28,51 @@ class TaskRepository:
         return result.scalar_one_or_none()
 
     async def list_for_project(
-        self, project_id: uuid.UUID, user_id: uuid.UUID
-    ) -> list[Task]:
-        result = await self.session.execute(
+        self,
+        project_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[Task], int]:
+        access_condition = (
+            Task.project_id == project_id,
+            OrganizationMember.user_id == user_id,
+        )
+
+        statement = (
             select(Task)
             .join(Project, Project.id == Task.project_id)
             .join(
                 OrganizationMember,
                 OrganizationMember.organization_id == Project.organization_id,
             )
-            .where(Task.project_id == project_id, OrganizationMember.user_id == user_id)
-            .order_by(Task.position.asc(), Task.created_at.asc())
+            .where(*access_condition)
+            .order_by(
+                Task.position.asc(),
+                Task.created_at.asc(),
+                Task.id.asc(),
+            )
+            .limit(limit)
+            .offset(offset)
         )
-        return list(result.scalars().all())
+
+        count_statement = (
+            select(func.count(Task.id))
+            .join(Project, Project.id == Task.project_id)
+            .join(
+                OrganizationMember,
+                OrganizationMember.organization_id == Project.organization_id,
+            )
+            .where(*access_condition)
+        )
+
+        tasks_result = await self.session.execute(statement)
+        total_result = await self.session.execute(count_statement)
+
+        tasks = list(tasks_result.scalars().all())
+        total = total_result.scalar_one()
+        return tasks, total
 
     async def add_task(self, task: Task) -> Task:
         self.session.add(task)

@@ -6,13 +6,14 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import OutboxStatus, TaskStatus
+from src.common.pagination import Page, PaginationParams
 from src.outbox.models import OutboxEvent
 from src.projects.exceptions import ProjectNotFoundError
 from src.projects.repository import ProjectRepository
 from src.tasks.exceptions import TaskNotFoundError, TaskVersionConflictError
 from src.tasks.models import Task, TaskComment, TaskStatusHistory
 from src.tasks.repository import TaskRepository
-from src.tasks.schemas import TaskCommentCreate, TaskCreate, TaskUpdate
+from src.tasks.schemas import TaskCommentCreate, TaskCreate, TaskResponse, TaskUpdate
 from src.users.models import User
 
 
@@ -65,11 +66,24 @@ class TaskService:
             )
             return task
 
-    async def list_tasks(self, project_id: uuid.UUID, user: User) -> list[Task]:
-        project = await self.projects.get_accessible_project(project_id, user.id)
-        if project is None:
-            raise ProjectNotFoundError()
-        return await self.tasks.list_for_project(project_id, user.id)
+    async def list_tasks(
+        self,
+        project_id: uuid.UUID,
+        user: User,
+        pagination: PaginationParams,
+    ) -> Page[TaskResponse]:
+        tasks, total = await self.tasks.list_for_project(
+            project_id,
+            user.id,
+            limit=pagination.limit,
+            offset=pagination.offset,
+        )
+        return Page[TaskResponse](
+            items=[TaskResponse.model_validate(task) for task in tasks],
+            total=total,
+            limit=pagination.limit,
+            offset=pagination.offset,
+        )
 
     async def get_task(self, task_id: uuid.UUID, user: User) -> Task:
         task = await self.tasks.get_accessible_task(task_id, user.id)

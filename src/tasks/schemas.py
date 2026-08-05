@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from src.common.enums import TaskPriority, TaskStatus
 from src.common.schemas import BaseSchema, TimestampSchema
@@ -39,6 +39,7 @@ class TaskUpdate(BaseSchema):
 
 
 class TaskResponse(TimestampSchema):
+    model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     project_id: uuid.UUID
     created_by_id: uuid.UUID
