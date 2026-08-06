@@ -7,10 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import OutboxStatus, TaskStatus
 from src.common.pagination import Page, PaginationParams
+from src.organizations.repository import OrganizationRepository
 from src.outbox.models import OutboxEvent
 from src.projects.exceptions import ProjectNotFoundError
 from src.projects.repository import ProjectRepository
-from src.tasks.exceptions import TaskNotFoundError, TaskVersionConflictError
+from src.tasks.exceptions import (
+    TaskAssigneeNotOrganizationMemberError,
+    TaskNotFoundError,
+    TaskVersionConflictError,
+)
 from src.tasks.models import Task, TaskComment, TaskStatusHistory
 from src.tasks.repository import TaskRepository
 from src.tasks.schemas import TaskCommentCreate, TaskCreate, TaskResponse, TaskUpdate
@@ -20,6 +25,7 @@ from src.users.models import User
 class TaskService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+        self.organizations = OrganizationRepository(session)
         self.projects = ProjectRepository(session)
         self.tasks = TaskRepository(session)
 
@@ -30,6 +36,7 @@ class TaskService:
             project = await self.projects.get_accessible_project(project_id, user.id)
             if project is None:
                 raise ProjectNotFoundError()
+            await self._validate_assignee(project.organization_id, data.assigned_to_id)
 
             task = await self.tasks.add_task(
                 Task(
@@ -100,6 +107,17 @@ class TaskService:
                 raise TaskNotFoundError()
 
             values = data.model_dump(exclude={"version"}, exclude_none=True)
+            if data.assigned_to_id is not None:
+                project = await self.projects.get_accessible_project(
+                    task.project_id,
+                    user.id,
+                )
+                if project is None:
+                    raise TaskNotFoundError()
+                await self._validate_assignee(
+                    project.organization_id,
+                    data.assigned_to_id,
+                )
             old_status = task.status
             updated = await self.tasks.update_task_optimistic(
                 task_id, data.version, values
@@ -162,6 +180,17 @@ class TaskService:
         if task is None:
             raise TaskNotFoundError()
         return await self.tasks.list_history(task_id, user.id)
+
+    async def _validate_assignee(
+        self,
+        organization_id: uuid.UUID,
+        assigned_to_id: uuid.UUID | None,
+    ) -> None:
+        if assigned_to_id is None:
+            return
+        member = await self.organizations.get_member(organization_id, assigned_to_id)
+        if member is None:
+            raise TaskAssigneeNotOrganizationMemberError()
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncIterator[None]:

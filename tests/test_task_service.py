@@ -8,7 +8,10 @@ from src.common.pagination import PaginationParams
 from src.outbox.models import OutboxEvent
 from src.projects.exceptions import ProjectNotFoundError
 from src.projects.models import Project
-from src.tasks.exceptions import TaskVersionConflictError
+from src.tasks.exceptions import (
+    TaskAssigneeNotOrganizationMemberError,
+    TaskVersionConflictError,
+)
 from src.tasks.models import Task, TaskStatusHistory
 from src.tasks.schemas import TaskCreate, TaskUpdate
 from src.tasks.service import TaskService
@@ -28,6 +31,20 @@ class FakeProjectRepository:
         if self.project is None or self.project.id != project_id:
             return None
         return self.project
+
+
+class FakeOrganizationRepository:
+    def __init__(self, member_user_ids: set[uuid.UUID] | None = None) -> None:
+        self.member_user_ids = member_user_ids or set()
+
+    async def get_member(
+        self,
+        organization_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> object | None:
+        if user_id not in self.member_user_ids:
+            return None
+        return object()
 
 
 class FakeTaskRepository:
@@ -110,10 +127,12 @@ def make_service(
     project: Project | None,
     task: Task | None = None,
     update_succeeds: bool = True,
+    member_user_ids: set[uuid.UUID] | None = None,
 ) -> tuple[TaskService, FakeSession, FakeTaskRepository]:
     session = FakeSession()
     service = TaskService(session)  # type: ignore[arg-type]
     task_repository = FakeTaskRepository(task=task, update_succeeds=update_succeeds)
+    service.organizations = FakeOrganizationRepository(member_user_ids)  # type: ignore[assignment]
     service.projects = FakeProjectRepository(project)  # type: ignore[assignment]
     service.tasks = task_repository  # type: ignore[assignment]
     return service, session, task_repository
@@ -161,6 +180,43 @@ async def test_create_task_denies_inaccessible_project_without_side_effects() ->
     assert task_repository.created_tasks == []
     assert task_repository.history == []
     assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_create_task_rejects_assignee_outside_organization() -> None:
+    user = make_user()
+    project = make_project()
+    assignee_id = uuid.uuid4()
+    service, session, task_repository = make_service(project=project)
+
+    with pytest.raises(TaskAssigneeNotOrganizationMemberError):
+        await service.create_task(
+            project.id,
+            TaskCreate(title="Ship API", assigned_to_id=assignee_id),
+            user,
+        )
+
+    assert task_repository.created_tasks == []
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_create_task_allows_assignee_from_organization() -> None:
+    user = make_user()
+    project = make_project()
+    assignee_id = uuid.uuid4()
+    service, _, task_repository = make_service(
+        project=project,
+        member_user_ids={assignee_id},
+    )
+
+    task = await service.create_task(
+        project.id,
+        TaskCreate(title="Ship API", assigned_to_id=assignee_id),
+        user,
+    )
+
+    assert task.assigned_to_id == assignee_id
 
 
 @pytest.mark.asyncio

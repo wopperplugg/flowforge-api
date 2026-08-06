@@ -32,6 +32,9 @@ class FakeRefreshSessionRepository:
             return None
         return self.refresh_session
 
+    async def get_by_jti_for_update(self, jti: uuid.UUID) -> RefreshSession | None:
+        return await self.get_by_jti(jti)
+
     async def revoke_family(self, family_id: uuid.UUID, revoked_at: datetime) -> None:
         self.revoked_families.append((family_id, revoked_at))
 

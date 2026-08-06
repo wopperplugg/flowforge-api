@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = Field(default="FlowForge API", alias="APP_NAME")
+    app_version: str = Field(default="0.1.0", alias="APP_VERSION")
     app_env: Literal["local", "test", "staging", "production"] = Field(
         default="local", alias="APP_ENV"
     )
@@ -67,9 +68,9 @@ class Settings(BaseSettings):
     jwt_audience: str = "flowforge-clients"
     rate_limit_requests: int = Field(default=120, gt=0)
     rate_limit_window_seconds: int = Field(default=60, gt=0)
+    rate_limit_redis_timeout_seconds: float = Field(default=0.25, gt=0)
     webhook_timeout_seconds: float = Field(default=5.0, gt=0)
     webhook_metrics_port: int = 9102
-
     outbox_batch_size: int = Field(default=25, alias="OUTBOX_BATCH_SIZE", gt=0)
     outbox_active_poll_interval: float = Field(
         default=1.0,
@@ -81,7 +82,12 @@ class Settings(BaseSettings):
         alias="OUTBOX_IDLE_POLL_INTERVAL",
         gt=0,
     )
-    outbox_metrics_port: int = 9101
+    outbox_metrics_port: int = Field(default=9101)
+
+    otel_enabled: bool = Field(default=True)
+    otel_service_name: str = Field(default="flowforge-api")
+    otel_exporter_otlp_endpoint: str = Field(default="http://jaeger:4317")
+    otel_exporter_otlp_insecure: bool = Field(default=True)
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":

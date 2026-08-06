@@ -2,15 +2,21 @@ import asyncio
 import signal
 
 import structlog
+from opentelemetry import trace
 from prometheus_client import start_http_server
 
 from src.config import settings
-from src.database import async_session_maker
+from src.database import async_session_maker, dispose_engine, engine
 from src.infrastructure.logging import configure_logging
 from src.infrastructure.metrics import (
     OUTBOX_EVENTS_PUBLISHED_TOTAL,
     OUTBOX_PENDING_EVENTS,
     OUTBOX_PUBLISH_FAILURES_TOTAL,
+)
+from src.infrastructure.tracing import (
+    configure_tracing,
+    instrument_sqlalchemy,
+    shutdown_tracing,
 )
 from src.messaging.contracts import OutboxMessage
 from src.messaging.publisher import RabbitMQPublisher
@@ -18,7 +24,17 @@ from src.outbox.models import OutboxEvent
 from src.outbox.repository import OutboxRepository
 
 configure_logging()
+configure_tracing(
+    service_name=f"{settings.otel_service_name}-outbox-worker",
+    service_version=settings.app_version,
+    deployment_environment=settings.app_env,
+    endpoint=settings.otel_exporter_otlp_endpoint,
+    enabled=settings.otel_enabled,
+    insecure=settings.otel_exporter_otlp_insecure,
+)
+instrument_sqlalchemy(engine, enabled=settings.otel_enabled)
 logger = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 def build_outbox_message(event: OutboxEvent) -> OutboxMessage:
@@ -54,43 +70,51 @@ async def process_outbox_once(
         processed = 0
 
         for event in events:
-            try:
-                message = build_outbox_message(event)
-                await publisher.publish(message)
+            with tracer.start_as_current_span(
+                "outbox.publish",
+                attributes={
+                    "flowforge.event_id": str(event.id),
+                    "flowforge.event_type": event.event_type,
+                    "flowforge.aggregate_type": event.aggregate_type,
+                },
+            ):
+                try:
+                    message = build_outbox_message(event)
+                    await publisher.publish(message)
 
-                async with session.begin():
-                    await repository.mark_processed(event)
+                    async with session.begin():
+                        await repository.mark_processed(event)
 
-            except Exception as exc:
-                logger.exception(
-                    "outbox_publish_failed",
-                    event_id=str(event.id),
-                    event_type=event.event_type,
-                    correlation_id=str(event.correlation_id),
-                    error=str(exc),
-                )
-                OUTBOX_PUBLISH_FAILURES_TOTAL.labels(
-                    event_type=event.event_type,
-                ).inc()
-
-                async with session.begin():
-                    await repository.mark_failed_or_retry(
-                        event,
-                        str(exc),
+                except Exception as exc:
+                    logger.exception(
+                        "outbox_publish_failed",
+                        event_id=str(event.id),
+                        event_type=event.event_type,
+                        correlation_id=str(event.correlation_id),
+                        error=str(exc),
                     )
+                    OUTBOX_PUBLISH_FAILURES_TOTAL.labels(
+                        event_type=event.event_type,
+                    ).inc()
 
-            else:
-                processed += 1
-                OUTBOX_EVENTS_PUBLISHED_TOTAL.labels(
-                    event_type=event.event_type,
-                ).inc()
+                    async with session.begin():
+                        await repository.mark_failed_or_retry(
+                            event,
+                            str(exc),
+                        )
 
-                logger.info(
-                    "outbox_event_published",
-                    event_id=str(event.id),
-                    event_type=event.event_type,
-                    correlation_id=str(event.correlation_id),
-                )
+                else:
+                    processed += 1
+                    OUTBOX_EVENTS_PUBLISHED_TOTAL.labels(
+                        event_type=event.event_type,
+                    ).inc()
+
+                    logger.info(
+                        "outbox_event_published",
+                        event_id=str(event.id),
+                        event_type=event.event_type,
+                        correlation_id=str(event.correlation_id),
+                    )
 
         return processed
 
@@ -145,13 +169,17 @@ async def main() -> None:
     async with RabbitMQPublisher(
         str(settings.rabbitmq_dsn),
     ) as publisher:
-        await run_outbox_loop(
-            publisher,
-            stop_event,
-            batch_size=settings.outbox_batch_size,
-            active_poll_interval=settings.outbox_active_poll_interval,
-            idle_poll_interval=settings.outbox_idle_poll_interval,
-        )
+        try:
+            await run_outbox_loop(
+                publisher,
+                stop_event,
+                batch_size=settings.outbox_batch_size,
+                active_poll_interval=settings.outbox_active_poll_interval,
+                idle_poll_interval=settings.outbox_idle_poll_interval,
+            )
+        finally:
+            await dispose_engine()
+            shutdown_tracing()
 
     logger.info("outbox_publisher_stopped")
 

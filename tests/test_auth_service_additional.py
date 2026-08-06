@@ -55,6 +55,9 @@ class FakeRefreshRepository:
             return None
         return self.session
 
+    async def get_by_jti_for_update(self, jti: uuid.UUID) -> RefreshSession | None:
+        return await self.get_by_jti(jti)
+
     async def revoke_all_for_user(
         self, user_id: uuid.UUID, revoked_at: datetime
     ) -> None:

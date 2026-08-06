@@ -5,6 +5,7 @@ x-app-environment: &app-environment
   REDIS_HOST: redis
   RABBITMQ_HOST: rabbitmq
   RABBITMQ_PORT: 5672
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
 
 x-app-service: &app-service
   image: ${FLOWFORGE_IMAGE:-ghcr.io/wopperplugg/flowforge-api:main}
@@ -27,6 +28,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 30s
@@ -43,6 +46,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
     restart: unless-stopped
   
   webhook-worker:
@@ -53,6 +60,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
     restart: unless-stopped
 
   migrate:
@@ -104,6 +115,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
     restart: unless-stopped
 
 volumes:

@@ -8,6 +8,7 @@ services:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
       RABBITMQ_HOST: rabbitmq
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     ports:
       - "8000:8000"
     volumes:
@@ -17,6 +18,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 10s
@@ -34,6 +37,7 @@ services:
       REDIS_HOST: redis
       RABBITMQ_HOST: rabbitmq
       OUTBOX_METRICS_PORT: "9101"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     ports:
       - "9101:9101"
     volumes:
@@ -45,6 +49,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     restart: unless-stopped
 
   webhook-worker:
@@ -57,6 +63,7 @@ services:
       REDIS_HOST: redis
       RABBITMQ_HOST: rabbitmq
       WEBHOOK_METRICS_PORT: "9102"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     ports:
       - "9102:9102"
     volumes:
@@ -68,6 +75,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     restart: unless-stopped
 
   postgres:
@@ -165,6 +174,19 @@ services:
       - prometheus
     restart: unless-stopped
 
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    
 volumes:
   postgres_data:
   redis_data:

@@ -111,8 +111,9 @@ class FakeAsyncClient:
     response: object = FakeResponse()
     calls: list[tuple[str, dict[str, object], dict[str, str]]] = []
 
-    def __init__(self, timeout: float) -> None:
+    def __init__(self, timeout: float, follow_redirects: bool = True) -> None:
         self.timeout = timeout
+        self.follow_redirects = follow_redirects
 
     async def __aenter__(self) -> "FakeAsyncClient":
         return self
@@ -187,6 +188,9 @@ async def test_deliver_webhooks_skips_missing_context_and_records_delivery(
 
     assert len(session.added) == 1
     assert FakeAsyncClient.calls[-1][0] == "https://example.com/hook"
+    assert (
+        FakeAsyncClient(timeout=1.0, follow_redirects=False).follow_redirects is False
+    )
 
 
 @pytest.mark.asyncio
@@ -219,6 +223,39 @@ async def test_deliver_webhooks_records_http_failure_without_raising(
     assert recorded.status_code == 404
     assert recorded.response_body == "not found"
     FakeAsyncClient.response = FakeResponse()
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhooks_rechecks_url_before_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeDeliverySession()
+    organization_id = uuid.uuid4()
+    safety_results = iter([True, False])
+    FakeAsyncClient.calls = []
+
+    async def fake_resolve(session: object, task_id: uuid.UUID) -> uuid.UUID:
+        return organization_id
+
+    monkeypatch.setattr(delivery, "resolve_task_organization_id", fake_resolve)
+    monkeypatch.setattr(delivery, "WebhookRepository", FakeWebhookRepository)
+    monkeypatch.setattr(
+        delivery,
+        "is_safe_webhook_url",
+        lambda url: next(safety_results),
+    )
+    monkeypatch.setattr(delivery, "decrypt_webhook_secret", lambda encrypted: "secret")
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    await delivery.deliver_webhooks_for_outbox_event(
+        session,  # type: ignore[arg-type]
+        event_id=uuid.uuid4(),
+        event_type="task.created",
+        payload={"task_id": str(uuid.uuid4())},
+    )
+
+    assert session.added == []
+    assert FakeAsyncClient.calls == []
 
 
 @pytest.mark.asyncio

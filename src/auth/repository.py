@@ -23,6 +23,12 @@ class RefreshSessionRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_jti_for_update(self, jti: uuid.UUID) -> RefreshSession | None:
+        result = await self.session.execute(
+            select(RefreshSession).where(RefreshSession.jti == jti).with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_id_for_user(
         self,
         session_id: uuid.UUID,

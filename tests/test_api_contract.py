@@ -107,11 +107,11 @@ def test_list_tasks_returns_paginated_http_response() -> None:
     app.dependency_overrides[get_current_user] = lambda: user
     app.dependency_overrides[get_task_service] = lambda: task_service
     try:
-        with TestClient(app) as client:
-            response = client.get(
-                f"/api/v1/projects/{project_id}/tasks",
-                params={"limit": 2, "offset": 1},
-            )
+        client = TestClient(app)
+        response = client.get(
+            f"/api/v1/projects/{project_id}/tasks",
+            params={"limit": 2, "offset": 1},
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -144,17 +144,17 @@ def test_list_tasks_returns_paginated_http_response() -> None:
 
 
 def test_liveness_endpoint_returns_ok() -> None:
-    with TestClient(app) as client:
-        response = client.get("/health/live")
+    client = TestClient(app)
+    response = client.get("/health/live")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
 def test_metrics_endpoint_exposes_prometheus_text() -> None:
-    with TestClient(app) as client:
-        client.get("/health/live")
-        response = client.get("/metrics")
+    client = TestClient(app)
+    client.get("/health/live")
+    response = client.get("/metrics")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")

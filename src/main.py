@@ -5,12 +5,13 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from src.auth.router import router as auth_router
 from src.common.exceptions import AppError
 from src.common.schemas import ErrorPayload, ErrorResponse
 from src.config import settings
-from src.database import dispose_engine
+from src.database import dispose_engine, engine
 from src.infrastructure.health import router as health_router
 from src.infrastructure.logging import configure_logging
 from src.infrastructure.metrics import PrometheusMetricsMiddleware
@@ -19,6 +20,11 @@ from src.infrastructure.middleware import RequestContextMiddleware
 from src.infrastructure.rate_limit import RateLimitMiddleware
 from src.infrastructure.redis import close_redis
 from src.infrastructure.request_context import get_request_id
+from src.infrastructure.tracing import (
+    configure_tracing,
+    instrument_sqlalchemy,
+    shutdown_tracing,
+)
 from src.organizations.router import router as organizations_router
 from src.projects.router import router as projects_router
 from src.tasks.router import router as tasks_router
@@ -26,12 +32,26 @@ from src.webhooks.router import router as webhooks_router
 
 configure_logging()
 
+configure_tracing(
+    service_name=settings.otel_service_name,
+    service_version=settings.app_version,
+    deployment_environment=settings.app_env,
+    endpoint=settings.otel_exporter_otlp_endpoint,
+    enabled=settings.otel_enabled,
+    insecure=settings.otel_exporter_otlp_insecure,
+)
+instrument_sqlalchemy(
+    engine,
+    enabled=settings.otel_enabled,
+)
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
     await close_redis()
     await dispose_engine()
+    shutdown_tracing()
 
 
 app = FastAPI(
@@ -39,6 +59,11 @@ app = FastAPI(
     debug=settings.app_debug,
     lifespan=lifespan,
 )
+if settings.otel_enabled:
+    FastAPIInstrumentor.instrument_app(
+        app,
+        excluded_urls="metrics,health/live",
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[str(origin) for origin in settings.app_cors_origins],

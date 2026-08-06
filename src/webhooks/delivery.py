@@ -52,7 +52,10 @@ async def deliver_webhooks_for_outbox_event(
     if not webhooks:
         return
 
-    async with httpx.AsyncClient(timeout=settings.webhook_timeout_seconds) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.webhook_timeout_seconds,
+        follow_redirects=False,
+    ) as client:
         for webhook in webhooks:
             if webhook.secret_encrypted is None or not is_safe_webhook_url(webhook.url):
                 continue
@@ -61,6 +64,8 @@ async def deliver_webhooks_for_outbox_event(
             signature = sign_webhook_payload(secret, timestamp, payload)
             status_code: int | None = None
             response_body: str | None = None
+            if not is_safe_webhook_url(webhook.url):
+                continue
             try:
                 response = await client.post(
                     webhook.url,

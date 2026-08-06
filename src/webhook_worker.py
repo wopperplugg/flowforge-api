@@ -7,17 +7,23 @@ from typing import Protocol, cast
 
 import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
+from opentelemetry import trace
 from prometheus_client import start_http_server
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.config import settings
-from src.database import async_session_maker
+from src.database import async_session_maker, dispose_engine, engine
 from src.infrastructure.metrics import (
     WEBHOOK_DLQ_TOTAL,
     WEBHOOK_MESSAGES_PROCESSED_TOTAL,
     WEBHOOK_PROCESSING_DURATION_SECONDS,
     WEBHOOK_RETRIES_TOTAL,
+)
+from src.infrastructure.tracing import (
+    configure_tracing,
+    instrument_sqlalchemy,
+    shutdown_tracing,
 )
 from src.messaging.contracts import OutboxMessage
 from src.messaging.idempotency import try_mark_processed
@@ -30,6 +36,16 @@ from src.webhooks.delivery import deliver_webhooks_for_outbox_event
 from src.webhooks.exceptions import NonRetryableWebhookError, RetryableWebhookError
 
 logger = logging.getLogger(__name__)
+configure_tracing(
+    service_name=f"{settings.otel_service_name}-webhook-worker",
+    service_version=settings.app_version,
+    deployment_environment=settings.app_env,
+    endpoint=settings.otel_exporter_otlp_endpoint,
+    enabled=settings.otel_enabled,
+    insecure=settings.otel_exporter_otlp_insecure,
+)
+instrument_sqlalchemy(engine, enabled=settings.otel_enabled)
+tracer = trace.get_tracer(__name__)
 
 CONSUMER_NAME = "webhook-worker"
 
@@ -94,78 +110,88 @@ async def process_message(message: AbstractIncomingMessage) -> None:
         },
     )
 
-    try:
-        async with async_session_maker() as session:
-            async with session.begin():
-                acquired = await try_mark_processed(
-                    session,
-                    message_id=event.event_id,
-                    consumer_name=CONSUMER_NAME,
-                )
-
-                duplicate = not acquired
-
-                if acquired:
-                    await deliver_webhooks_for_outbox_event(
+    with tracer.start_as_current_span(
+        "webhook.process_message",
+        attributes={
+            "flowforge.event_id": str(event.event_id),
+            "flowforge.event_type": event.event_type,
+            "flowforge.correlation_id": str(event.correlation_id),
+        },
+    ):
+        try:
+            async with async_session_maker() as session:
+                async with session.begin():
+                    acquired = await try_mark_processed(
                         session,
-                        event_id=event.event_id,
-                        event_type=event.event_type,
-                        payload=event.payload,
-                        correlation_id=event.correlation_id,
+                        message_id=event.event_id,
+                        consumer_name=CONSUMER_NAME,
                     )
 
-    except NonRetryableWebhookError:
-        WEBHOOK_MESSAGES_PROCESSED_TOTAL.labels(
-            event_type=event.event_type,
-            result="non_retryable_error",
-        ).inc()
-        WEBHOOK_DLQ_TOTAL.labels(reason="non_retryable_error").inc()
-        WEBHOOK_PROCESSING_DURATION_SECONDS.labels(
-            event_type=event.event_type,
-        ).observe(time.perf_counter() - started_at)
-        logger.exception(
-            "Non-retryable webhook error",
-            extra={"event_id": str(event.event_id)},
-        )
-        await message.reject(requeue=False)
-        return
+                    duplicate = not acquired
 
-    except (RetryableWebhookError, SQLAlchemyError):
-        WEBHOOK_MESSAGES_PROCESSED_TOTAL.labels(
-            event_type=event.event_type,
-            result="retry",
-        ).inc()
-        WEBHOOK_PROCESSING_DURATION_SECONDS.labels(
-            event_type=event.event_type,
-        ).observe(time.perf_counter() - started_at)
-        logger.exception(
-            "Retryable webhook error",
-            extra={"event_id": str(event.event_id)},
-        )
-        await handle_retry(
-            message,
-            event_id=str(event.event_id),
-            correlation_id=(
-                str(event.correlation_id) if event.correlation_id is not None else None
-            ),
-        )
-        return
+                    if acquired:
+                        await deliver_webhooks_for_outbox_event(
+                            session,
+                            event_id=event.event_id,
+                            event_type=event.event_type,
+                            payload=event.payload,
+                            correlation_id=event.correlation_id,
+                        )
 
-    except Exception:
-        WEBHOOK_MESSAGES_PROCESSED_TOTAL.labels(
-            event_type=event.event_type,
-            result="error",
-        ).inc()
-        WEBHOOK_DLQ_TOTAL.labels(reason="unexpected_error").inc()
-        WEBHOOK_PROCESSING_DURATION_SECONDS.labels(
-            event_type=event.event_type,
-        ).observe(time.perf_counter() - started_at)
-        logger.exception(
-            "Webhook delivery failed",
-            extra={"event_id": str(event.event_id)},
-        )
-        await message.reject(requeue=False)
-        return
+        except NonRetryableWebhookError:
+            WEBHOOK_MESSAGES_PROCESSED_TOTAL.labels(
+                event_type=event.event_type,
+                result="non_retryable_error",
+            ).inc()
+            WEBHOOK_DLQ_TOTAL.labels(reason="non_retryable_error").inc()
+            WEBHOOK_PROCESSING_DURATION_SECONDS.labels(
+                event_type=event.event_type,
+            ).observe(time.perf_counter() - started_at)
+            logger.exception(
+                "Non-retryable webhook error",
+                extra={"event_id": str(event.event_id)},
+            )
+            await message.reject(requeue=False)
+            return
+
+        except (RetryableWebhookError, SQLAlchemyError):
+            WEBHOOK_MESSAGES_PROCESSED_TOTAL.labels(
+                event_type=event.event_type,
+                result="retry",
+            ).inc()
+            WEBHOOK_PROCESSING_DURATION_SECONDS.labels(
+                event_type=event.event_type,
+            ).observe(time.perf_counter() - started_at)
+            logger.exception(
+                "Retryable webhook error",
+                extra={"event_id": str(event.event_id)},
+            )
+            await handle_retry(
+                message,
+                event_id=str(event.event_id),
+                correlation_id=(
+                    str(event.correlation_id)
+                    if event.correlation_id is not None
+                    else None
+                ),
+            )
+            return
+
+        except Exception:
+            WEBHOOK_MESSAGES_PROCESSED_TOTAL.labels(
+                event_type=event.event_type,
+                result="error",
+            ).inc()
+            WEBHOOK_DLQ_TOTAL.labels(reason="unexpected_error").inc()
+            WEBHOOK_PROCESSING_DURATION_SECONDS.labels(
+                event_type=event.event_type,
+            ).observe(time.perf_counter() - started_at)
+            logger.exception(
+                "Webhook delivery failed",
+                extra={"event_id": str(event.event_id)},
+            )
+            await message.reject(requeue=False)
+            return
 
     await message.ack()
 
@@ -247,6 +273,8 @@ async def run_worker() -> None:
         logger.info("Closing channel and connection gracefully...")
         await channel.close()
         await connection.close()
+        await dispose_engine()
+        shutdown_tracing()
         logger.info("Worker shut down successfully.")
 
 

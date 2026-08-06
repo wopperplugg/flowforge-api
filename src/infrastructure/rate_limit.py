@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
@@ -15,18 +16,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        if request.url.path.startswith("/health"):
+        if settings.app_env == "test" or request.url.path.startswith("/health"):
             return await call_next(request)
 
         client = request.client.host if request.client else "unknown"
         key = f"rate_limit:{client}:{request.url.path}"
 
         try:
-            current = await redis_client.incr(key)
-            if current == 1:
-                await redis_client.expire(key, settings.rate_limit_window_seconds)
+            async with asyncio.timeout(settings.rate_limit_redis_timeout_seconds):
+                current = await redis_client.incr(key)
+                if current == 1:
+                    await redis_client.expire(key, settings.rate_limit_window_seconds)
             if current > settings.rate_limit_requests:
                 raise RateLimitExceededError()
-        except RedisError:
+        except (RedisError, TimeoutError):
             return await call_next(request)
         return await call_next(request)

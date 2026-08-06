@@ -63,7 +63,7 @@ class AuthService:
         token_response: TokenResponse | None = None
 
         async with self._transaction():
-            refresh_session = await self.refresh_sessions.get_by_jti(jti)
+            refresh_session = await self.refresh_sessions.get_by_jti_for_update(jti)
             if refresh_session is None or refresh_session.user_id != user_id:
                 error = InvalidTokenError()
             else:
