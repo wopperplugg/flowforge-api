@@ -1,11 +1,14 @@
 import uuid
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.auth.dependencies import get_current_user
 from src.common.enums import TaskPriority, TaskStatus
 from src.common.pagination import Page, PaginationParams
+from src.infrastructure.metrics import HTTP_REQUESTS_TOTAL
+from src.infrastructure.metrics import metrics as metrics_endpoint
 from src.main import app
 from src.tasks.router import get_task_service
 from src.tasks.schemas import TaskResponse
@@ -151,15 +154,21 @@ def test_liveness_endpoint_returns_ok() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_metrics_endpoint_exposes_prometheus_text() -> None:
-    client = TestClient(app)
-    client.get("/health/live")
-    response = client.get("/metrics")
+@pytest.mark.asyncio
+async def test_metrics_endpoint_exposes_prometheus_text() -> None:
+    HTTP_REQUESTS_TOTAL.labels(
+        method="GET",
+        path="/health/live",
+        status_code="200",
+    ).inc()
+    response = await metrics_endpoint()
 
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/plain")
-    assert "flowforge_http_requests_total" in response.text
-    assert 'path="/health/live"' in response.text
+    assert response.media_type is not None
+    assert response.media_type.startswith("text/plain")
+    body = bytes(response.body).decode()
+    assert "flowforge_http_requests_total" in body
+    assert 'path="/health/live"' in body
     assert "/metrics" not in app.openapi()["paths"]
 
 

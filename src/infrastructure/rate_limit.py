@@ -16,7 +16,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        if request.url.path.startswith("/health"):
+        if request.url.path.startswith(("/health", "/metrics")):
             return await call_next(request)
 
         client = request.client.host if request.client else "unknown"
@@ -29,6 +29,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     await redis_client.expire(key, settings.rate_limit_window_seconds)
             if current > settings.rate_limit_requests:
                 raise RateLimitExceededError()
-        except (RedisError, TimeoutError):
+        except (RedisError, RuntimeError, TimeoutError):
             return await call_next(request)
         return await call_next(request)

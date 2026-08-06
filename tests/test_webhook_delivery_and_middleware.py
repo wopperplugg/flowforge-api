@@ -434,3 +434,10 @@ async def test_rate_limit_middleware_allows_health_and_handles_limits(
     )
     result = await middleware.dispatch(request, call_next)  # type: ignore[arg-type]
     assert result == "ok"
+
+    monkeypatch.setattr(
+        "src.infrastructure.rate_limit.redis_client",
+        FakeRedis(RuntimeError("redis event loop is closed")),
+    )
+    result = await middleware.dispatch(request, call_next)  # type: ignore[arg-type]
+    assert result == "ok"
