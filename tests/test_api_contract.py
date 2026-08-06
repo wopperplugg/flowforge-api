@@ -50,6 +50,14 @@ class FakeTaskService:
         )
 
 
+class FakeRedis:
+    async def incr(self, key: str) -> int:
+        return 1
+
+    async def expire(self, key: str, seconds: int) -> None:
+        return None
+
+
 def make_user() -> User:
     return User(
         id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
@@ -102,11 +110,14 @@ def test_openapi_documents_task_list_pagination_contract() -> None:
     }
 
 
-def test_list_tasks_returns_paginated_http_response() -> None:
+def test_list_tasks_returns_paginated_http_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     user = make_user()
     task_service = FakeTaskService()
     project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
 
+    monkeypatch.setattr("src.infrastructure.rate_limit.redis_client", FakeRedis())
     app.dependency_overrides[get_current_user] = lambda: user
     app.dependency_overrides[get_task_service] = lambda: task_service
     try:
