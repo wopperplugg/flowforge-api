@@ -16,7 +16,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        if settings.app_env == "test" or request.url.path.startswith("/health"):
+        if request.url.path.startswith("/health"):
             return await call_next(request)
 
         client = request.client.host if request.client else "unknown"
