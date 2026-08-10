@@ -184,6 +184,39 @@ class TaskService:
                 )
             return task
 
+    async def delete_task(
+        self,
+        project_id: uuid.UUID,
+        task_id: uuid.UUID,
+        user: User,
+    ) -> None:
+        async with self._transaction():
+            project = await self.projects.get_accessible_project(project_id, user.id)
+            if project is None:
+                raise ProjectNotFoundError()
+
+            task = await self.tasks.get_accessible_task(task_id, user.id)
+            if task is None or task.project_id != project.id:
+                raise TaskNotFoundError()
+
+            payload = {
+                "task_id": str(task.id),
+                "project_id": str(task.project_id),
+            }
+            await self.tasks.delete_task(task)
+            self.session.add(
+                OutboxEvent(
+                    aggregate_type="task",
+                    aggregate_id=task.id,
+                    event_type="task.deleted",
+                    event_version=1,
+                    organization_id=project.organization_id,
+                    payload=payload,
+                    status=OutboxStatus.PENDING,
+                    attempts=0,
+                )
+            )
+
     async def add_comment(
         self,
         task_id: uuid.UUID,

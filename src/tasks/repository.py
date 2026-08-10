@@ -80,6 +80,10 @@ class TaskRepository:
         await self.session.refresh(task)
         return task
 
+    async def delete_task(self, task: Task) -> None:
+        await self.session.delete(task)
+        await self.session.flush()
+
     async def update_task_optimistic(
         self,
         task_id: uuid.UUID,

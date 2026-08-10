@@ -10,6 +10,7 @@ from src.projects.exceptions import ProjectNotFoundError
 from src.projects.models import Project
 from src.tasks.exceptions import (
     TaskAssigneeNotOrganizationMemberError,
+    TaskNotFoundError,
     TaskVersionConflictError,
 )
 from src.tasks.models import Task, TaskStatusHistory
@@ -53,6 +54,7 @@ class FakeTaskRepository:
         self.update_succeeds = update_succeeds
         self.created_tasks: list[Task] = []
         self.history: list[TaskStatusHistory] = []
+        self.deleted_tasks: list[Task] = []
         self.optimistic_updates: list[tuple[uuid.UUID, int, dict[str, object]]] = []
         self.list_calls: list[tuple[uuid.UUID, uuid.UUID, int, int]] = []
 
@@ -66,6 +68,11 @@ class FakeTaskRepository:
         history.id = uuid.uuid4()
         self.history.append(history)
         return history
+
+    async def delete_task(self, task: Task) -> None:
+        self.deleted_tasks.append(task)
+        if self.task == task:
+            self.task = None
 
     async def get_accessible_task(
         self,
@@ -454,4 +461,102 @@ async def test_update_task_version_conflict_has_no_history_or_outbox() -> None:
 
     assert task.status == TaskStatus.TODO
     assert task_repository.history == []
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_delete_task_removes_task_and_emits_outbox_event_atomically() -> None:
+    user = make_user()
+    project = make_project()
+    task = Task(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        created_by_id=user.id,
+        title="Review API",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.MEDIUM,
+        position=0,
+        version=1,
+    )
+    service, session, task_repository = make_service(project=project, task=task)
+
+    await service.delete_task(project.id, task.id, user)
+
+    assert task_repository.deleted_tasks == [task]
+    assert task_repository.task is None
+    assert session.begin_count == 1
+    assert len(session.added) == 1
+    event = session.added[0]
+    assert isinstance(event, OutboxEvent)
+    assert event.aggregate_type == "task"
+    assert event.aggregate_id == task.id
+    assert event.event_type == "task.deleted"
+    assert event.event_version == 1
+    assert event.organization_id == project.organization_id
+    assert event.status == OutboxStatus.PENDING
+    assert event.payload == {
+        "task_id": str(task.id),
+        "project_id": str(project.id),
+    }
+
+
+@pytest.mark.asyncio
+async def test_delete_task_rejects_unknown_task_without_side_effects() -> None:
+    user = make_user()
+    project = make_project()
+    service, session, task_repository = make_service(project=project, task=None)
+
+    with pytest.raises(TaskNotFoundError):
+        await service.delete_task(project.id, uuid.uuid4(), user)
+
+    assert task_repository.deleted_tasks == []
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_delete_task_rejects_task_from_another_project_without_side_effects() -> (
+    None
+):
+    user = make_user()
+    project = make_project()
+    task = Task(
+        id=uuid.uuid4(),
+        project_id=uuid.uuid4(),
+        created_by_id=user.id,
+        title="Review API",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.MEDIUM,
+        position=0,
+        version=1,
+    )
+    service, session, task_repository = make_service(project=project, task=task)
+
+    with pytest.raises(TaskNotFoundError):
+        await service.delete_task(project.id, task.id, user)
+
+    assert task_repository.deleted_tasks == []
+    assert task_repository.task == task
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_delete_task_denies_inaccessible_project_without_side_effects() -> None:
+    user = make_user()
+    task = Task(
+        id=uuid.uuid4(),
+        project_id=uuid.uuid4(),
+        created_by_id=user.id,
+        title="Review API",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.MEDIUM,
+        position=0,
+        version=1,
+    )
+    service, session, task_repository = make_service(project=None, task=task)
+
+    with pytest.raises(ProjectNotFoundError):
+        await service.delete_task(uuid.uuid4(), task.id, user)
+
+    assert task_repository.deleted_tasks == []
+    assert task_repository.task == task
     assert session.added == []

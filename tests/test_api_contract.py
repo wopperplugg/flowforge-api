@@ -18,6 +18,7 @@ from src.users.models import User
 class FakeTaskService:
     def __init__(self) -> None:
         self.calls: list[tuple[uuid.UUID, uuid.UUID, PaginationParams]] = []
+        self.delete_calls: list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]] = []
 
     async def list_tasks(
         self,
@@ -49,6 +50,14 @@ class FakeTaskService:
             offset=pagination.offset,
         )
 
+    async def delete_task(
+        self,
+        project_id: uuid.UUID,
+        task_id: uuid.UUID,
+        current_user: User,
+    ) -> None:
+        self.delete_calls.append((project_id, task_id, current_user.id))
+
 
 class FakeRedis:
     async def incr(self, key: str) -> int:
@@ -74,6 +83,7 @@ def test_openapi_contains_core_resource_routes() -> None:
     assert "/api/v1/organizations" in schema["paths"]
     assert "/api/v1/organizations/{organization_id}/projects" in schema["paths"]
     assert "/api/v1/projects/{project_id}/tasks" in schema["paths"]
+    assert "/api/v1/projects/{project_id}/tasks/{task_id}" in schema["paths"]
     assert "/api/v1/organizations/{organization_id}/webhooks" in schema["paths"]
 
 
@@ -155,6 +165,28 @@ def test_list_tasks_returns_paginated_http_response(
     assert task_service.calls == [
         (project_id, user.id, PaginationParams(limit=2, offset=1))
     ]
+
+
+def test_delete_task_returns_no_content_and_delegates_to_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_user()
+    task_service = FakeTaskService()
+    project_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    task_id = uuid.UUID("33333333-3333-3333-3333-333333333333")
+
+    monkeypatch.setattr("src.infrastructure.rate_limit.redis_client", FakeRedis())
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_task_service] = lambda: task_service
+    try:
+        client = TestClient(app)
+        response = client.delete(f"/api/v1/projects/{project_id}/tasks/{task_id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert task_service.delete_calls == [(project_id, task_id, user.id)]
 
 
 def test_liveness_endpoint_returns_ok() -> None:

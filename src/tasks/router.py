@@ -73,6 +73,19 @@ async def update_task(
     return TaskResponse.model_validate(task)
 
 
+@router.delete(
+    "/api/v1/projects/{project_id}/tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_task(
+    project_id: uuid.UUID,
+    task_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    task_service: Annotated[TaskService, Depends(get_task_service)],
+) -> None:
+    await task_service.delete_task(project_id, task_id, current_user)
+
+
 @router.post(
     "/api/v1/tasks/{task_id}/comments",
     response_model=TaskCommentResponse,
