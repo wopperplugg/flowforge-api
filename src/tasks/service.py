@@ -2,6 +2,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,15 @@ from src.users.models import User
 
 
 class TaskService:
+    _TASK_UPDATED_FIELDS = {
+        "title",
+        "description",
+        "priority",
+        "due_date",
+        "assigned_to_id",
+        "status",
+    }
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.organizations = OrganizationRepository(session)
@@ -66,7 +76,9 @@ class TaskService:
                     aggregate_type="task",
                     aggregate_id=task.id,
                     event_type="task.created",
-                    payload={"task_id": str(task.id), "project_id": str(project_id)},
+                    event_version=1,
+                    organization_id=project.organization_id,
+                    payload=self._task_event_payload(task),
                     status=OutboxStatus.PENDING,
                     attempts=0,
                 )
@@ -107,7 +119,11 @@ class TaskService:
                 raise TaskNotFoundError()
 
             values = data.model_dump(exclude={"version"}, exclude_none=True)
-            if data.assigned_to_id is not None:
+            publishes_task_updated = bool(
+                self._TASK_UPDATED_FIELDS.intersection(values)
+            )
+            project = None
+            if data.assigned_to_id is not None or publishes_task_updated:
                 project = await self.projects.get_accessible_project(
                     task.project_id,
                     user.id,
@@ -147,6 +163,21 @@ class TaskService:
                             "old_status": old_status.value,
                             "new_status": data.status.value,
                         },
+                        status=OutboxStatus.PENDING,
+                        attempts=0,
+                    )
+                )
+            if publishes_task_updated:
+                if project is None:
+                    raise TaskNotFoundError()
+                self.session.add(
+                    OutboxEvent(
+                        aggregate_type="task",
+                        aggregate_id=task.id,
+                        event_type="task.updated",
+                        event_version=1,
+                        organization_id=project.organization_id,
+                        payload=self._task_event_payload(task),
                         status=OutboxStatus.PENDING,
                         attempts=0,
                     )
@@ -191,6 +222,21 @@ class TaskService:
         member = await self.organizations.get_member(organization_id, assigned_to_id)
         if member is None:
             raise TaskAssigneeNotOrganizationMemberError()
+
+    def _task_event_payload(self, task: Task) -> dict[str, Any]:
+        return {
+            "task_id": str(task.id),
+            "project_id": str(task.project_id),
+            "title": task.title,
+            "description": task.description,
+            "status": task.status.value,
+            "priority": task.priority.value,
+            "due_date": task.due_date.isoformat() if task.due_date else None,
+            "assigned_to_id": (
+                str(task.assigned_to_id) if task.assigned_to_id is not None else None
+            ),
+            "created_by_id": str(task.created_by_id),
+        }
 
     @asynccontextmanager
     async def _transaction(self) -> AsyncIterator[None]:

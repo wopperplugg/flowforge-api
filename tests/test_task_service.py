@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -138,6 +138,22 @@ def make_service(
     return service, session, task_repository
 
 
+def expected_task_event_payload(task: Task) -> dict[str, object]:
+    return {
+        "task_id": str(task.id),
+        "project_id": str(task.project_id),
+        "title": task.title,
+        "description": task.description,
+        "status": task.status.value,
+        "priority": task.priority.value,
+        "due_date": task.due_date.isoformat() if task.due_date else None,
+        "assigned_to_id": (
+            str(task.assigned_to_id) if task.assigned_to_id is not None else None
+        ),
+        "created_by_id": str(task.created_by_id),
+    }
+
+
 @pytest.mark.asyncio
 async def test_create_task_creates_history_and_outbox_event_atomically() -> None:
     user = make_user()
@@ -165,8 +181,10 @@ async def test_create_task_creates_history_and_outbox_event_atomically() -> None
     assert isinstance(event, OutboxEvent)
     assert event.aggregate_id == task.id
     assert event.event_type == "task.created"
+    assert event.event_version == 1
+    assert event.organization_id == project.organization_id
     assert event.status == OutboxStatus.PENDING
-    assert event.payload == {"task_id": str(task.id), "project_id": str(project.id)}
+    assert event.payload == expected_task_event_payload(task)
 
 
 @pytest.mark.asyncio
@@ -321,11 +339,90 @@ async def test_update_task_status_uses_optimistic_lock_and_emits_event() -> None
     assert task_repository.history[0].old_status == TaskStatus.TODO
     assert task_repository.history[0].new_status == TaskStatus.REVIEW
 
+    status_event = next(
+        event
+        for event in session.added
+        if isinstance(event, OutboxEvent) and event.event_type == "task.status_changed"
+    )
+    assert status_event.payload["old_status"] == "todo"
+    assert status_event.payload["new_status"] == "review"
+
+    updated_event = next(
+        event
+        for event in session.added
+        if isinstance(event, OutboxEvent) and event.event_type == "task.updated"
+    )
+    assert updated_event.aggregate_type == "task"
+    assert updated_event.aggregate_id == task.id
+    assert updated_event.organization_id == project.organization_id
+    assert updated_event.payload == expected_task_event_payload(updated)
+
+
+@pytest.mark.asyncio
+async def test_update_task_search_fields_emit_task_updated_event() -> None:
+    user = make_user()
+    project = make_project()
+    assignee_id = uuid.uuid4()
+    task = Task(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        created_by_id=user.id,
+        title="Review API",
+        description="Old description",
+        status=TaskStatus.TODO,
+        priority=TaskPriority.MEDIUM,
+        due_date=None,
+        position=0,
+        version=3,
+    )
+    service, session, task_repository = make_service(
+        project=project,
+        task=task,
+        member_user_ids={assignee_id},
+    )
+
+    updated = await service.update_task(
+        task.id,
+        TaskUpdate(
+            title="Index API docs",
+            description="Updated description",
+            priority=TaskPriority.HIGH,
+            due_date=date(2026, 2, 3),
+            assigned_to_id=assignee_id,
+            version=3,
+        ),
+        user,
+    )
+
+    assert updated.title == "Index API docs"
+    assert updated.description == "Updated description"
+    assert updated.priority == TaskPriority.HIGH
+    assert updated.due_date == date(2026, 2, 3)
+    assert updated.assigned_to_id == assignee_id
+    assert task_repository.optimistic_updates == [
+        (
+            task.id,
+            3,
+            {
+                "title": "Index API docs",
+                "description": "Updated description",
+                "assigned_to_id": assignee_id,
+                "priority": TaskPriority.HIGH,
+                "due_date": date(2026, 2, 3),
+            },
+        )
+    ]
+
+    assert len(session.added) == 1
     event = session.added[0]
     assert isinstance(event, OutboxEvent)
-    assert event.event_type == "task.status_changed"
-    assert event.payload["old_status"] == "todo"
-    assert event.payload["new_status"] == "review"
+    assert event.aggregate_type == "task"
+    assert event.aggregate_id == task.id
+    assert event.event_type == "task.updated"
+    assert event.event_version == 1
+    assert event.organization_id == project.organization_id
+    assert event.status == OutboxStatus.PENDING
+    assert event.payload == expected_task_event_payload(updated)
 
 
 @pytest.mark.asyncio
